@@ -1,0 +1,28 @@
+name: Deploy Apps
+on:
+push:
+branches: [ main ]
+jobs:
+android:
+runs-on: ubuntu-latest
+steps:
+- uses: actions/checkout@v3
+- name: set up JDK
+uses: actions/setup-java@v3
+with:
+java-version: '17'
+distribution: 'temurin'
+- name: Build APK
+run: ./gradlew assembleRelease
+- name: Upload APK
+uses: ncipollo/release-action@v1
+with:
+artifacts: "app/build/outputs/apk/release/*.apk"
+token: ${{ secrets.GITHUB_TOKEN }}
+allowUpdates: true
+ios:
+runs-on: macos-latest
+steps:
+- uses: actions/checkout@v3
+- name: Build IPA
+run: echo "Building iOS app
