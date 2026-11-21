@@ -58,8 +58,21 @@ export async function createConfiguredApp() {
   ];
   const mobileDir = candidateMobileDirs.find((d) => fs.existsSync(path.join(d, 'index.html')));
   if (mobileDir) {
-    expressApp.use('/mobile', express.static(mobileDir));
-    expressApp.get('/mobile/*', (_req, res) => res.sendFile(path.join(mobileDir, 'index.html')));
+    const sendMobileIndex = (_req: express.Request, res: express.Response) => {
+      const html = fs
+        .readFileSync(path.join(mobileDir, 'index.html'), 'utf8')
+        .replace(/<base\s+href="[^"]*">/i, '<base href="/mobile/">');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.send(html);
+    };
+    expressApp.get('/mobile', (req, res) => {
+      if (req.originalUrl === '/mobile' || req.originalUrl.startsWith('/mobile?')) {
+        return res.redirect(302, `/mobile/${req.originalUrl.slice('/mobile'.length)}`);
+      }
+      return sendMobileIndex(req, res);
+    });
+    expressApp.use('/mobile', express.static(mobileDir, { index: false }));
+    expressApp.get('/mobile/*', sendMobileIndex);
   }
 
   const candidateAdminDirs = [

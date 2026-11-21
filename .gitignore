@@ -24,7 +24,9 @@ mobile/ios/.symlinks/
 !AutoPark.apk
 !AutoPark.exe
 
-# Local runtime XML & OS clutter
+# Local runtime XML, tunnel binary/token & OS clutter
 autopark_data.xml
+tools/cloudflared.exe
+tools/tunnel_token.txt
 .DS_Store
 Thumbs.db
