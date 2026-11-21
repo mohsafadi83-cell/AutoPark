@@ -1,28 +1,66 @@
-name: Deploy Apps
+name: Deploy Apps (GitHub Pages iOS PWA & APK Release)
+
 on:
-push:
-branches: [ main ]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: 'pages'
+  cancel-in-progress: false
+
 jobs:
-android:
-runs-on: ubuntu-latest
-steps:
-- uses: actions/checkout@v3
-- name: set up JDK
-uses: actions/setup-java@v3
-with:
-java-version: '17'
-distribution: 'temurin'
-- name: Build APK
-run: ./gradlew assembleRelease
-- name: Upload APK
-uses: ncipollo/release-action@v1
-with:
-artifacts: "app/build/outputs/apk/release/*.apk"
-token: ${{ secrets.GITHUB_TOKEN }}
-allowUpdates: true
-ios:
-runs-on: macos-latest
-steps:
-- uses: actions/checkout@v3
-- name: Build IPA
-run: echo "Building iOS app
+  deploy-ios-pwa-pages:
+    name: Deploy iOS / Mobile Web App to GitHub Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare Web App with /AutoPark/ base href
+        run: |
+          mkdir -p _site
+          cp -r mobile/build/web/* _site/
+          sed -i 's|<base href="/">|<base href="/AutoPark/">|g' _site/index.html
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  publish-release:
+    name: Publish AutoPark.apk & AutoPark.exe Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish Latest Release with APK & Desktop EXE
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: AutoPark Latest Release (Server 46.185.128.165)
+          body: |
+            ### AutoPark v2.0 — Ready-to-Install Downloads
+            - **Android App**: `AutoPark.apk` (configured for `http://46.185.128.165:3000`)
+            - **Windows Desktop**: `AutoPark.exe`
+            - **iOS / Safari PWA**: https://mohsafadi83-cell.github.io/AutoPark/ (or `http://46.185.128.165:5174`)
+          files: |
+            AutoPark.apk
+            AutoPark.exe
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
