@@ -1,0 +1,56 @@
+name: Auto Park CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (Build & E2E Tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - working-directory: backend
+        run: npm ci
+      - working-directory: backend
+        run: npm run build
+      - working-directory: backend
+        run: npm test
+
+  admin:
+    name: Web Admin Panel (Typecheck, Lint, Tests, Build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      - working-directory: admin
+        run: npm ci
+      - working-directory: admin
+        run: npm run build
+      - working-directory: admin
+        run: npm test -- --run
+
+  mobile:
+    name: Flutter Mobile App (Analyze & Widget Tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - working-directory: mobile
+        run: flutter pub get
+      - working-directory: mobile
+        run: flutter analyze
+      - working-directory: mobile
+        run: flutter test

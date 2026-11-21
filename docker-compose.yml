@@ -1,0 +1,60 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: autopark-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-autopark}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-autopark_dev_password}
+      POSTGRES_DB: ${DB_NAME:-autopark}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-autopark} -d ${DB_NAME:-autopark}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: autopark-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_MODE: ${APP_MODE:-SIMULATION}
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-autopark}
+      DB_PASSWORD: ${DB_PASSWORD:-autopark_dev_password}
+      DB_NAME: ${DB_NAME:-autopark}
+      DB_RUN_MIGRATIONS: "true"
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-in-production-minimum-32-chars-2026}
+      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      INDUSTRIAL_PROTOCOL: ${INDUSTRIAL_PROTOCOL:-MOCK}
+      INDUSTRIAL_WRITE_ENABLED: ${INDUSTRIAL_WRITE_ENABLED:-false}
+    ports:
+      - "3000:3000"
+
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    container_name: autopark-admin
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:

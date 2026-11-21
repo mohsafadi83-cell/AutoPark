@@ -1,0 +1,30 @@
+# Node & Backend build artifacts
+node_modules/
+backend/dist/
+backend/.pgdata/
+admin/dist/
+*.log
+.env
+.env.local
+.env.*.local
+
+# Flutter & Android intermediate build artifacts
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.idea/
+mobile/build/*
+!mobile/build/web/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+
+# Keep ready-to-deploy binaries & iOS PWA in repository
+!AutoPark.apk
+!AutoPark.exe
+
+# Local runtime XML & OS clutter
+autopark_data.xml
+.DS_Store
+Thumbs.db

@@ -1,0 +1,139 @@
+export enum Role {
+  SUPER_ADMIN = 'SUPER_ADMIN',
+  SYSTEM_ADMIN = 'SYSTEM_ADMIN',
+  OPERATOR = 'OPERATOR',
+  PARKING_ATTENDANT = 'PARKING_ATTENDANT',
+  MAINTENANCE_ENGINEER = 'MAINTENANCE_ENGINEER',
+  CUSTOMER = 'CUSTOMER',
+  READ_ONLY = 'READ_ONLY',
+}
+
+export enum UserStatus {
+  ACTIVE = 'ACTIVE',
+  DISABLED = 'DISABLED',
+  LOCKED = 'LOCKED',
+}
+
+export enum SpaceStatus {
+  AVAILABLE = 'AVAILABLE',
+  OCCUPIED = 'OCCUPIED',
+  RESERVED = 'RESERVED',
+  MOVING = 'MOVING',
+  BLOCKED = 'BLOCKED',
+  MAINTENANCE = 'MAINTENANCE',
+  ERROR = 'ERROR',
+}
+
+export enum RequestType {
+  PARK = 'PARK',
+  RETRIEVE = 'RETRIEVE',
+}
+
+export enum RequestStatus {
+  PENDING = 'PENDING',
+  VALIDATING = 'VALIDATING',
+  APPROVED = 'APPROVED',
+  PROCESSING = 'PROCESSING',
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+  CANCELLED = 'CANCELLED',
+}
+export const ACTIVE_REQUEST_STATUSES = [
+  RequestStatus.PENDING,
+  RequestStatus.VALIDATING,
+  RequestStatus.APPROVED,
+  RequestStatus.PROCESSING,
+  RequestStatus.IN_PROGRESS,
+];
+
+export enum RequestSource {
+  MOBILE = 'MOBILE',
+  ADMIN = 'ADMIN',
+  API = 'API',
+}
+
+export enum CommandStatus {
+  CREATED = 'CREATED',
+  VALIDATED = 'VALIDATED',
+  AUTHORIZED = 'AUTHORIZED',
+  SENT = 'SENT',
+  ACKNOWLEDGED = 'ACKNOWLEDGED',
+  EXECUTING = 'EXECUTING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+  TIMEOUT = 'TIMEOUT',
+  CANCELLED = 'CANCELLED',
+}
+export const TERMINAL_COMMAND_STATUSES = [
+  CommandStatus.COMPLETED,
+  CommandStatus.FAILED,
+  CommandStatus.TIMEOUT,
+  CommandStatus.CANCELLED,
+];
+/** Statuses after which the physical machine may have received the order. */
+export const IN_FLIGHT_COMMAND_STATUSES = [CommandStatus.SENT, CommandStatus.ACKNOWLEDGED, CommandStatus.EXECUTING];
+
+export enum AlarmSeverity {
+  INFO = 'INFO',
+  WARNING = 'WARNING',
+  CRITICAL = 'CRITICAL',
+  EMERGENCY = 'EMERGENCY',
+}
+
+export enum AlarmStatus {
+  ACTIVE = 'ACTIVE',
+  ACKNOWLEDGED = 'ACKNOWLEDGED',
+  RESOLVED = 'RESOLVED',
+}
+
+export enum EventCategory {
+  PLC = 'PLC',
+  MACHINE = 'MACHINE',
+  ERROR = 'ERROR',
+  WARNING = 'WARNING',
+  USER = 'USER',
+  SECURITY = 'SECURITY',
+  SYSTEM = 'SYSTEM',
+}
+
+export enum Protocol {
+  MOCK = 'MOCK',
+  VNC = 'VNC',
+  SIEMENS_S7 = 'SIEMENS_S7',
+  OPC_UA = 'OPC_UA',
+  MODBUS_TCP = 'MODBUS_TCP',
+  MQTT = 'MQTT',
+  REST_GATEWAY = 'REST_GATEWAY',
+  CUSTOM_TCP = 'CUSTOM_TCP',
+}
+
+export enum NotificationType {
+  VEHICLE_READY = 'VEHICLE_READY',
+  PARKING_COMPLETED = 'PARKING_COMPLETED',
+  RETRIEVAL_COMPLETED = 'RETRIEVAL_COMPLETED',
+  REQUEST_FAILED = 'REQUEST_FAILED',
+  SYSTEM_ERROR = 'SYSTEM_ERROR',
+  CRITICAL_ALARM = 'CRITICAL_ALARM',
+  MAINTENANCE_REQUIRED = 'MAINTENANCE_REQUIRED',
+  INFO = 'INFO',
+}
+
+export const PARK_STEPS = [
+  'CREATED',
+  'VALIDATED',
+  'APPROVED',
+  'COMMAND_SENT',
+  'CONTROLLER_CONFIRMED',
+  'VEHICLE_MOVING',
+  'PARKING_COMPLETED',
+] as const;
+export const RETRIEVE_STEPS = [
+  'CREATED',
+  'VALIDATED',
+  'VEHICLE_LOCATED',
+  'PREPARING_SYSTEM',
+  'PLATFORM_MOVING',
+  'RETRIEVAL_IN_PROGRESS',
+  'VEHICLE_READY',
+] as const;
