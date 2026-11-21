@@ -16,6 +16,9 @@ on:
 env:
   API_BASE_URL: ${{ github.event.inputs.api_base_url || 'http://46.185.128.165:3000' }}
 
+permissions:
+  contents: write
+
 jobs:
   build-android-and-ios-pwa:
     name: Build Android APK & iOS Web PWA (46.185.128.165)
@@ -87,13 +90,25 @@ jobs:
         working-directory: mobile
         run: flutter pub get
 
-      - name: Build iOS Release (No Codesign)
+      - name: Build iOS Release & Package AutoPark-iOS.ipa
         working-directory: mobile
-        run: flutter build ios --release --no-codesign --dart-define=API_BASE_URL=${{ env.API_BASE_URL }}
+        run: |
+          flutter build ios --release --no-codesign --dart-define=API_BASE_URL=${{ env.API_BASE_URL }}
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          zip -r ../AutoPark-iOS.ipa Payload
 
-      - name: Upload iOS Runner.app Artifact
+      - name: Upload iOS IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AutoPark-iOS-App-Unsigned
-          path: mobile/build/ios/iphoneos/Runner.app
-          retention-days: 30
+          name: AutoPark-iOS-IPA
+          path: AutoPark-iOS.ipa
+          retention-days: 90
+
+      - name: Attach AutoPark-iOS.ipa to Latest GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          files: AutoPark-iOS.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
