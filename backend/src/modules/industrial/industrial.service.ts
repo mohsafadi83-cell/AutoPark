@@ -518,7 +518,7 @@ export class IndustrialIntegrationService implements OnModuleInit, OnModuleDestr
 
   async getSystemStatus() {
     const { settings } = await this.getRuntimeSettings();
-    if (this.controller?.isConnected()) {
+    if (this.controller) {
       this.lastControllerStatus = await this.controller.getSystemStatus().catch(() => ({ ...OFFLINE_STATUS }));
     } else {
       this.lastControllerStatus = { ...OFFLINE_STATUS };
@@ -532,12 +532,12 @@ export class IndustrialIntegrationService implements OnModuleInit, OnModuleDestr
 
     let state: 'ONLINE' | 'WARNING' | 'ERROR' | 'OFFLINE' = 'ONLINE';
     let message: string | null = null;
-    if (!cs.connected || !cs.plcConnected) {
-      state = 'OFFLINE';
-      message = 'Industrial controller is offline';
-    } else if (cs.emergencyStop) {
+    if (cs.emergencyStop) {
       state = 'ERROR';
       message = 'Emergency Stop is active';
+    } else if (!cs.connected || !cs.plcConnected) {
+      state = 'OFFLINE';
+      message = 'Industrial controller is offline';
     } else if (!cs.safetyOk) {
       state = 'ERROR';
       message = 'Safety interlock tripped';
