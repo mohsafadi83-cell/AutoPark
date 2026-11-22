@@ -306,7 +306,7 @@ namespace AutoPark
 
         static void AddDefaultUsers(AppSettings s)
         {
-            s.Users["superadmin"] = new UserAccount { Username = "superadmin", Password = "Admin@12345", FullName = "م. رامي النقا (مدير النظام الأعلى)", Role = "SUPER_ADMIN", Phone = "+962795100001", Email = "superadmin@autopark.jo" };
+            s.Users["superadmin"] = new UserAccount { Username = "superadmin", Password = "Admin@12345", FullName = "Mohammad Al-Safadi", Role = "SUPER_ADMIN", Phone = "+962795100001", Email = "superadmin@autopark.jo" };
             s.Users["admin"] = new UserAccount { Username = "admin", Password = "Admin@12345", FullName = "خالد الطراونة (مدير النظام)", Role = "SYSTEM_ADMIN", Phone = "+962795100002", Email = "admin@autopark.jo" };
             s.Users["operator"] = new UserAccount { Username = "operator", Password = "Operator@123", FullName = "فهد العبادي (مشغّل النظام)", Role = "OPERATOR", Phone = "+962795100003", Email = "operator@autopark.jo" };
             s.Users["attendant"] = new UserAccount { Username = "attendant", Password = "Operator@123", FullName = "سعد الزعبي (موظف مواقف)", Role = "PARKING_ATTENDANT", Phone = "+962785100004", Email = "attendant@autopark.jo" };
@@ -641,14 +641,9 @@ namespace AutoPark
                             }
                             foreach (var c in Commands)
                             {
-                                if (c.RequestedBy != null && c.RequestedBy.Contains("أحمد المجالي"))
+                                if (c.RequestedBy != null && (c.RequestedBy.Contains("أحمد المجالي") || c.RequestedBy.Contains("عبدالله النسور") || c.RequestedBy.Contains("رامي النقا")))
                                 {
-                                    c.RequestedBy = c.RequestedBy.Replace("م. أحمد المجالي", "م. رامي النقا").Replace("أحمد المجالي", "رامي النقا");
-                                    migrated = true;
-                                }
-                                if (c.RequestedBy != null && c.RequestedBy.Contains("عبدالله النسور"))
-                                {
-                                    c.RequestedBy = "م. رامي النقا (مدير النظام الأعلى)";
+                                    c.RequestedBy = "Mohammad Al-Safadi";
                                     migrated = true;
                                 }
                             }
@@ -726,7 +721,7 @@ namespace AutoPark
                 Type = "PARK",
                 PlateNumber = "22-78910",
                 SpaceNumber = "L21",
-                RequestedBy = "م. رامي النقا (مدير النظام الأعلى)",
+                RequestedBy = "Mohammad Al-Safadi",
                 Status = "COMPLETED",
                 CreatedAt = DateTime.Now.AddMinutes(-25).ToString("yyyy-MM-dd HH:mm:ss"),
                 CompletedAt = DateTime.Now.AddMinutes(-24).ToString("yyyy-MM-dd HH:mm:ss")

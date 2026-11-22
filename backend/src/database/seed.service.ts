@@ -236,7 +236,7 @@ export class SeedService implements OnModuleInit {
     if (count > 0) return;
     const hash = await bcrypt.hash(this.cfg.bootstrapAdmin.password, this.cfg.auth.bcryptRounds);
     await this.usersRepo.save({
-      fullName: 'Super Administrator',
+      fullName: 'Mohammad Al-Safadi',
       username: this.cfg.bootstrapAdmin.username,
       email: this.cfg.bootstrapAdmin.email,
       passwordHash: hash,
@@ -249,7 +249,7 @@ export class SeedService implements OnModuleInit {
   private async seedDemoData() {
     // Default Jordanian users & phone numbers (+962)
     const demoUsers: Array<{ username: string; fullName: string; email: string; phone: string; password: string; role: Role }> = [
-      { username: 'superadmin', fullName: 'م. رامي النقا (مدير النظام الأعلى)', email: 'superadmin@autopark.jo', phone: '+962795100001', password: 'Admin@12345', role: Role.SUPER_ADMIN },
+      { username: 'superadmin', fullName: 'Mohammad Al-Safadi', email: 'superadmin@autopark.jo', phone: '+962795100001', password: 'Admin@12345', role: Role.SUPER_ADMIN },
       { username: 'admin', fullName: 'خالد الطراونة (مدير النظام)', email: 'admin@autopark.jo', phone: '+962795100002', password: 'Admin@12345', role: Role.SYSTEM_ADMIN },
       { username: 'operator', fullName: 'فهد العبادي (مشغّل النظام)', email: 'operator@autopark.jo', phone: '+962795100003', password: 'Operator@123', role: Role.OPERATOR },
       { username: 'attendant', fullName: 'سعد الزعبي (موظف مواقف)', email: 'attendant@autopark.jo', phone: '+962785100004', password: 'Operator@123', role: Role.PARKING_ATTENDANT },

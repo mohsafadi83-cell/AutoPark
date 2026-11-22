@@ -61,7 +61,7 @@ namespace AutoPark
             // English display for built-in staff accounts
             switch ((u.Username ?? "").ToLowerInvariant())
             {
-                case "superadmin": return "Eng. Rami Al-Naqa (Super Admin)";
+                case "superadmin": return "Mohammad Al-Safadi";
                 case "admin": return "Khaled Al-Tarawneh (System Admin)";
                 case "operator": return "Fahad Al-Abbadi (Operator)";
                 case "attendant": return "Saad Al-Zoubi (Attendant)";
