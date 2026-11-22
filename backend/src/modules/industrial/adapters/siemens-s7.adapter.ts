@@ -659,7 +659,14 @@ export class SiemensS7Adapter implements IndustrialController {
   }
 
   async getSystemStatus(): Promise<ControllerStatus> {
-    if (!this.isConnected()) return { ...OFFLINE_STATUS };
+    if (!this.isConnected()) {
+      return {
+        ...OFFLINE_STATUS,
+        emergencyStop: this.softEmergencyStop,
+        machineState: this.softEmergencyStop ? 'EMERGENCY_STOP' : OFFLINE_STATUS.machineState,
+        safetyOk: !this.softEmergencyStop && OFFLINE_STATUS.safetyOk,
+      };
+    }
     const snap = this.getSensorsSnapshot();
     const running = [...this.commands.values()].find((c) =>
       ['RECEIVED', 'ACKNOWLEDGED', 'EXECUTING'].includes(c.feedback.status),

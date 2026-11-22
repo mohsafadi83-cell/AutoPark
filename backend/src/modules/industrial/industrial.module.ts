@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Global, Module, Param, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Global, Module, Param, Post, Put, Query } from '@nestjs/common';
 import { IsIn, IsOptional, IsString } from 'class-validator';
 import { AuthUser, CurrentUser, ReqMeta, RequestMeta, RequirePermissions } from '../../common/decorators';
 import { CommandStatus, RequestType } from '../../common/enums';
 import { PaginationQuery } from '../../common/pagination';
-import { Permission } from '../../common/permissions';
+import { hasPermission, Permission } from '../../common/permissions';
 import { MockScenario } from './adapters/mock-industrial.adapter';
 import { EmergencyRecoveryAction, SiemensS7Adapter } from './adapters/siemens-s7.adapter';
 import { IndustrialIntegrationService } from './industrial.service';
@@ -55,14 +55,24 @@ export class IndustrialControllerHttp {
     return this.industrial.getSensorsSnapshot();
   }
 
+  /**
+   * Emergency Stop (ESTOP_ON) is safety-critical and allowed for ALL authenticated user roles.
+   * Releasing / resetting E-Stop (ESTOP_OFF, SAFE_RESET, etc.) requires ALARMS_ACKNOWLEDGE permission.
+   */
   @Post('industrial/s7/recovery')
-  @RequirePermissions(Permission.ALARMS_ACKNOWLEDGE)
   executeEmergencyRecovery(
     @Body() body: { action: EmergencyRecoveryAction },
     @CurrentUser() user: AuthUser,
     @ReqMeta() meta: RequestMeta,
   ) {
-    return this.industrial.executeEmergencyRecovery(body.action, user, meta);
+    const action = body?.action;
+    if (!action) throw new BadRequestException('action is required');
+    if (action !== 'ESTOP_ON' && !hasPermission(user.role, Permission.ALARMS_ACKNOWLEDGE)) {
+      throw new ForbiddenException(
+        'Only authorized supervisors/engineers can release Emergency Stop. / إلغاء إيقاف الطوارئ مقتصر على المشرفين أو مدير النظام فقط.',
+      );
+    }
+    return this.industrial.executeEmergencyRecovery(action, user, meta);
   }
 
   @Post('industrial/s7/manual')
