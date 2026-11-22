@@ -998,6 +998,15 @@ namespace AutoPark
             _grid.Columns.Add("Status", Loc.T("Status", "الحالة"));
             _grid.Columns.Add("Reason", Loc.T("Revoke Reason / Last Seen", "سبب الإلغاء / آخر ظهور"));
 
+            var colEdit = new DataGridViewButtonColumn
+            {
+                Name = "Edit",
+                HeaderText = Loc.T("Edit", "تعديل"),
+                Text = Loc.T("✏️ Edit", "✏️ تعديل"),
+                UseColumnTextForButtonValue = true,
+                Width = 85,
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None
+            };
             var colRevoke = new DataGridViewButtonColumn
             {
                 Name = "Revoke",
@@ -1025,23 +1034,141 @@ namespace AutoPark
                 Width = 80,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.None
             };
+            _grid.Columns.Add(colEdit);
             _grid.Columns.Add(colRevoke);
             _grid.Columns.Add(colActivate);
             _grid.Columns.Add(colDel);
 
             foreach (DataGridViewColumn c in _grid.Columns)
             {
-                if (c.Name != "Revoke" && c.Name != "Activate" && c.Name != "Delete")
+                if (c.Name != "Edit" && c.Name != "Revoke" && c.Name != "Activate" && c.Name != "Delete")
                     c.ReadOnly = true;
             }
 
             _grid.CellClick += OnGridCellClick;
+            _grid.CellDoubleClick += delegate (object s, DataGridViewCellEventArgs ev)
+            {
+                if (ev.RowIndex >= 0)
+                {
+                    string rowId = Convert.ToString(_grid.Rows[ev.RowIndex].Cells["Id"].Value);
+                    var found = ParkState.Instance.Devices.Find(x => x.Id == rowId);
+                    if (found != null) ShowEditDeviceDialog(found);
+                }
+            };
 
             gridCard.Controls.Add(_grid);
             Controls.Add(gridCard);
             Controls.Add(topCard);
 
             RefreshDevices();
+        }
+
+        void ShowEditDeviceDialog(AuthorizedDeviceItem dev)
+        {
+            var dlg = new Form
+            {
+                Text = Loc.T("Edit Authorized MAC Device", "تعديل بيانات وعنوان MAC للجهاز"),
+                Size = new Size(460, 410),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                BackColor = Theme.Surface,
+                RightToLeft = Loc.IsArabic ? RightToLeft.Yes : RightToLeft.No,
+                RightToLeftLayout = Loc.IsArabic
+            };
+
+            var tbEmp = MakeField(dlg, Loc.T("Employee Full Name:", "اسم الموظف الكامل:"), 22, 34, 400);
+            tbEmp.Text = dev.EmployeeName ?? "";
+
+            var capUsr = Theme.Label(Loc.T("Employee Username:", "حساب الموظف:"), Theme.F(8.5f), Theme.Muted);
+            capUsr.SetBounds(22, 74, 400, 16);
+            var cmbUsr = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Font = Theme.F(9.8f) };
+            cmbUsr.SetBounds(22, 92, 400, 32);
+            cmbUsr.Items.Add("");
+            foreach (var u in _shell.Settings.Users.Values)
+                if (u.Role != "CUSTOMER") cmbUsr.Items.Add(u.Username);
+            cmbUsr.Text = dev.Username ?? "";
+            dlg.Controls.Add(capUsr);
+            dlg.Controls.Add(cmbUsr);
+
+            var tbMac = MakeField(dlg, Loc.T("MAC Address (AA:BB:CC:DD:EE:FF):", "عنوان MAC Address (مثال AA:BB:CC:DD:EE:FF):"), 22, 150, 400);
+            tbMac.Text = dev.MacAddress ?? "";
+
+            var tbDevId = MakeField(dlg, Loc.T("Mobile Device ID (Optional):", "معرّف الهاتف Device ID (اختياري):"), 22, 208, 400);
+            tbDevId.Text = dev.DeviceId ?? "";
+
+            var tbModel = MakeField(dlg, Loc.T("Phone Model (Samsung / iPhone):", "نوع الهاتف (Samsung / iPhone):"), 22, 266, 400);
+            tbModel.Text = dev.DeviceModel ?? "";
+
+            var chkCtrl = new CheckBox
+            {
+                Text = Loc.T("Allow remote parking control from this phone", "السماح بالتحكم بالمواقف من هذا الهاتف"),
+                Checked = dev.CanControl,
+                AutoSize = true,
+                Font = Theme.Semi(9.2f),
+                ForeColor = Theme.Ink
+            };
+            chkCtrl.SetBounds(22, 304, 400, 24);
+            dlg.Controls.Add(chkCtrl);
+
+            var btnSave = new ModernButton
+            {
+                Text = Loc.T("Save Changes", "حفظ التعديلات"),
+                IconGlyph = Icons.Check,
+                BaseColor = Theme.Primary,
+                HoverColor = Theme.PrimaryHover
+            };
+            btnSave.SetBounds(22, 336, 190, 34);
+
+            var btnCancel = new ModernButton
+            {
+                Text = Loc.T("Cancel", "إلغاء"),
+                BaseColor = Theme.SurfaceHover,
+                HoverColor = Theme.Border,
+                ForeColor = Theme.Ink
+            };
+            btnCancel.SetBounds(232, 336, 190, 34);
+            btnCancel.Click += delegate { dlg.DialogResult = DialogResult.Cancel; dlg.Close(); };
+
+            btnSave.Click += delegate
+            {
+                string emp = tbEmp.Text.Trim();
+                string usr = cmbUsr.Text.Trim();
+                string mac = tbMac.Text.Trim().ToUpperInvariant();
+                string dId = tbDevId.Text.Trim().ToUpperInvariant();
+                string mdl = tbModel.Text.Trim();
+                if (string.IsNullOrEmpty(emp))
+                {
+                    Loc.ShowMsg("Employee name is required.", "اسم الموظف مطلوب.", "Warning", "تنبيه", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                if (string.IsNullOrEmpty(mac) && string.IsNullOrEmpty(dId))
+                {
+                    Loc.ShowMsg("Please keep at least a MAC Address or Device ID.", "يرجى إدخال عنوان MAC Address أو معرّف الجهاز على الأقل.", "Warning", "تنبيه", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                try
+                {
+                    ParkState.Instance.UpdateDeviceOnBackend(dev.Id, emp, usr, mac, dId, mdl, chkCtrl.Checked);
+                    ParkState.Instance.RecordLocalAudit("DEVICE_UPDATE", string.IsNullOrEmpty(mac) ? dId : mac,
+                        Loc.T("Updated employee device: ", "تعديل بيانات وعنوان MAC للجهاز: ") + emp, Loc.UserDisplay(_shell.CurrentUser));
+                    _lblInfo.ForeColor = Theme.Ok;
+                    _lblInfo.Text = Loc.T("✅ Updated device details for " + emp + ".", "✅ تم حفظ تعديل عنوان الـ MAC وبيانات الجهاز للموظف (" + emp + ") بنجاح.");
+                    LoadGrid();
+                    dlg.DialogResult = DialogResult.OK;
+                    dlg.Close();
+                }
+                catch (Exception ex)
+                {
+                    Loc.ShowMsg("Failed to update device:\n" + ex.Message, "تعذر تعديل بيانات الجهاز:\n" + ex.Message, "Error", "خطأ", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            };
+
+            dlg.Controls.Add(btnSave);
+            dlg.Controls.Add(btnCancel);
+            dlg.ShowDialog(FindForm());
+            dlg.Dispose();
         }
 
         static TextBox MakeField(Control parent, string caption, int x, int y, int w)
@@ -1099,6 +1226,12 @@ namespace AutoPark
             string emp = Convert.ToString(_grid.Rows[ev.RowIndex].Cells["Employee"].Value);
             string mac = Convert.ToString(_grid.Rows[ev.RowIndex].Cells["Mac"].Value);
 
+            if (ev.ColumnIndex == _grid.Columns["Edit"].Index)
+            {
+                var found = ParkState.Instance.Devices.Find(x => x.Id == id);
+                if (found != null) ShowEditDeviceDialog(found);
+                return;
+            }
             if (ev.ColumnIndex == _grid.Columns["Revoke"].Index)
             {
                 var conf = Loc.ShowMsg(

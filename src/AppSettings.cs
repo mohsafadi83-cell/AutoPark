@@ -945,6 +945,34 @@ namespace AutoPark
             return resp;
         }
 
+        public string UpdateDeviceOnBackend(string id, string employeeName, string username, string macAddress, string deviceId, string deviceModel, bool canControl)
+        {
+            string body = "{\"employeeName\":\"" + EscapeJson(employeeName) + "\""
+                + ",\"username\":\"" + EscapeJson(username ?? "") + "\""
+                + ",\"macAddress\":\"" + EscapeJson(macAddress ?? "") + "\""
+                + ",\"deviceId\":\"" + EscapeJson(deviceId ?? "") + "\""
+                + ",\"deviceModel\":\"" + EscapeJson(deviceModel ?? "") + "\""
+                + ",\"canControl\":" + (canControl ? "true" : "false") + "}";
+            if (string.IsNullOrEmpty(BackendToken))
+            {
+                var d = Devices.Find(x => x.Id == id);
+                if (d != null)
+                {
+                    d.EmployeeName = employeeName;
+                    d.Username = username;
+                    d.MacAddress = macAddress;
+                    d.DeviceId = deviceId;
+                    d.DeviceModel = deviceModel;
+                    d.CanControl = canControl;
+                }
+                Save();
+                return "LOCAL_OK";
+            }
+            string resp = HttpSend("PUT", ApiBaseUrl + "/devices/" + id, body);
+            PullDevicesFromBackend();
+            return resp;
+        }
+
         public string RevokeDeviceOnBackend(string id, string reason, bool disableUserAccount)
         {
             if (string.IsNullOrEmpty(BackendToken))

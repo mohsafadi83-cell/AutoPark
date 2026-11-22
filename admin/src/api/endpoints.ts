@@ -140,6 +140,42 @@ export const usersApi = {
   roles: () => get<RoleDefinition[]>('/roles'),
 };
 
+export interface AuthorizedDevice {
+  id: string;
+  employeeName: string;
+  username: string | null;
+  macAddress: string | null;
+  deviceId: string | null;
+  deviceModel: string | null;
+  status: 'ACTIVE' | 'REVOKED';
+  canControl: boolean;
+  revokeReason: string | null;
+  revokedBy: string | null;
+  revokedAt: string | null;
+  lastSeenAt: string | null;
+  createdAt: string;
+}
+
+export interface DevicePayload {
+  employeeName: string;
+  username?: string;
+  macAddress?: string;
+  deviceId?: string;
+  deviceModel?: string;
+  canControl?: boolean;
+}
+
+export const devicesApi = {
+  list: () => get<{ enforceWhitelist: boolean; items: AuthorizedDevice[] }>('/devices'),
+  register: (body: DevicePayload) => post<AuthorizedDevice>('/devices', body),
+  update: (id: string, body: Partial<DevicePayload>) => put<AuthorizedDevice>(`/devices/${id}`, body),
+  updatePolicy: (enforceWhitelist: boolean) => put<{ enforceWhitelist: boolean }>('/devices/policy', { enforceWhitelist }),
+  revoke: (id: string, reason?: string, disableUserAccount?: boolean) =>
+    post<AuthorizedDevice>(`/devices/${id}/revoke`, { reason, disableUserAccount }),
+  activate: (id: string) => post<AuthorizedDevice>(`/devices/${id}/activate`, {}),
+  remove: (id: string) => del(`/devices/${id}`),
+};
+
 export const auditApi = {
   audit: (q?: Query) => get<Paginated<AuditLog>>('/audit', q),
   events: (q?: Query) => get<Paginated<SystemEvent>>('/events', q),

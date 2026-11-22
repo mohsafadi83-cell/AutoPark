@@ -25,6 +25,15 @@ export class RegisterDeviceDto {
   @IsOptional() @IsBoolean() canControl?: boolean;
 }
 
+export class UpdateDeviceDto {
+  @IsOptional() @IsString() employeeName?: string;
+  @IsOptional() @IsString() username?: string;
+  @IsOptional() @IsString() macAddress?: string;
+  @IsOptional() @IsString() deviceId?: string;
+  @IsOptional() @IsString() deviceModel?: string;
+  @IsOptional() @IsBoolean() canControl?: boolean;
+}
+
 export class RevokeDeviceDto {
   @IsOptional() @IsString() reason?: string;
   @IsOptional() @IsBoolean() disableUserAccount?: boolean;
@@ -149,6 +158,89 @@ export class DevicesService {
       ipAddress: meta.ip,
       userAgent: meta.userAgent,
       details: { employeeName, username: saved.username, macAddress: mac, deviceId: devId },
+    });
+
+    return this.toDto(saved);
+  }
+
+  async updateDevice(id: string, dto: UpdateDeviceDto, admin: AuthUser, meta: RequestMeta) {
+    const dev = await this.repo.findOne({ where: { id } });
+    if (!dev) throw AppError.notFound('Authorized device');
+
+    if (dto.employeeName !== undefined) {
+      const emp = dto.employeeName.trim();
+      if (!emp) throw AppError.badRequest('اسم الموظف مطلوب');
+      dev.employeeName = emp;
+    }
+
+    if (dto.username !== undefined) {
+      dev.username = dto.username.trim() || null;
+    }
+
+    if (dto.macAddress !== undefined) {
+      const trimmedMac = dto.macAddress.trim();
+      if (!trimmedMac) {
+        dev.macAddress = null;
+      } else {
+        const mac = normalizeMacAddress(trimmedMac);
+        if (!mac) {
+          throw AppError.badRequest('صيغة عنوان الـ MAC Address غير صحيحة (مثال صحيح: AA:BB:CC:DD:EE:FF)');
+        }
+        const dupMac = await this.repo.findOne({ where: { macAddress: mac } });
+        if (dupMac && dupMac.id !== dev.id) {
+          throw AppError.badRequest(`عنوان الـ MAC (${mac}) مسجّل مسبقاً للموظف: ${dupMac.employeeName}`);
+        }
+        dev.macAddress = mac;
+      }
+    }
+
+    if (dto.deviceId !== undefined) {
+      const trimmedId = dto.deviceId.trim();
+      if (!trimmedId) {
+        dev.deviceId = null;
+      } else {
+        const devId = normalizeDeviceId(trimmedId);
+        if (!devId) {
+          throw AppError.badRequest('معرّف الجهاز (Device ID) غير صالح');
+        }
+        const dupDev = await this.repo.findOne({ where: { deviceId: devId } });
+        if (dupDev && dupDev.id !== dev.id) {
+          throw AppError.badRequest(`معرّف الجهاز (${devId}) مسجّل مسبقاً للموظف: ${dupDev.employeeName}`);
+        }
+        dev.deviceId = devId;
+      }
+    }
+
+    if (!dev.macAddress && !dev.deviceId) {
+      throw AppError.badRequest('يرجى الإبقاء على عنوان MAC Address أو معرّف الجهاز (Device ID) على الأقل');
+    }
+
+    if (dto.deviceModel !== undefined) {
+      dev.deviceModel = dto.deviceModel.trim() || null;
+    }
+
+    if (dto.canControl !== undefined) {
+      dev.canControl = Boolean(dto.canControl);
+    }
+
+    const saved = await this.repo.save(dev);
+
+    await this.audit.log({
+      userId: admin.id,
+      username: admin.username,
+      action: 'DEVICE_UPDATED',
+      entity: 'authorized_device',
+      entityId: saved.id,
+      ipAddress: meta.ip,
+      userAgent: meta.userAgent,
+      details: {
+        employeeName: saved.employeeName,
+        username: saved.username,
+        macAddress: saved.macAddress,
+        deviceId: saved.deviceId,
+        deviceModel: saved.deviceModel,
+        canControl: saved.canControl,
+      },
     });
 
     return this.toDto(saved);
@@ -409,6 +501,17 @@ export class DevicesController {
   @RequirePermissions(Permission.USERS_MANAGE)
   updatePolicy(@Body() dto: DevicePolicyDto, @CurrentUser() user: AuthUser, @ReqMeta() meta: RequestMeta) {
     return this.service.setEnforceWhitelist(dto.enforceWhitelist, user, meta);
+  }
+
+  @Put(':id')
+  @RequirePermissions(Permission.USERS_MANAGE)
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateDeviceDto,
+    @CurrentUser() user: AuthUser,
+    @ReqMeta() meta: RequestMeta,
+  ) {
+    return this.service.updateDevice(id, dto, user, meta);
   }
 
   @Post(':id/revoke')

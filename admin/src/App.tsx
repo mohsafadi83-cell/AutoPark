@@ -12,6 +12,7 @@ import { AlarmsPage } from './pages/AlarmsPage';
 import { AuditHistoryPage } from './pages/AuditHistoryPage';
 import { CommandsPage } from './pages/CommandsPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { DevicesPage } from './pages/DevicesPage';
 import { IndustrialConfigPage } from './pages/IndustrialConfigPage';
 import { LoginPage } from './pages/LoginPage';
 import { MonitoringPage } from './pages/MonitoringPage';
@@ -85,6 +86,14 @@ export function AppRoutes() {
           element={
             <RequirePermission permissions={['users.manage']}>
               <UsersPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="devices"
+          element={
+            <RequirePermission permissions={['users.manage']}>
+              <DevicesPage />
             </RequirePermission>
           }
         />

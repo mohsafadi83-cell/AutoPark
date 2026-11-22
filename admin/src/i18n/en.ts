@@ -58,6 +58,7 @@ const en = {
     requests: 'Parking Requests',
     vehicles: 'Vehicles',
     users: 'Users',
+    devices: 'MAC Devices',
     roles: 'Roles & Permissions',
     alarms: 'Alarms',
     commands: 'Industrial Commands',

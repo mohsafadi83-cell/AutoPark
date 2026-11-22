@@ -60,6 +60,7 @@ const ar: TranslationShape = {
     requests: 'طلبات الاصطفاف',
     vehicles: 'المركبات',
     users: 'المستخدمون',
+    devices: 'أجهزة الموبايل (MAC)',
     roles: 'الأدوار والصلاحيات',
     alarms: 'الإنذارات',
     commands: 'الأوامر الصناعية',
