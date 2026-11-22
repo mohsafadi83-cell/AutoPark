@@ -32,7 +32,8 @@ namespace AutoPark
         {
             _settings = settings;
             Theme.PrepareForm(this);
-            Text = Loc.T("Sign In — Auto Park (Jordan)", "تسجيل الدخول — أوتو بارك (الأردن)");
+            if (BrandAssets.AppIcon != null) Icon = BrandAssets.AppIcon;
+            Text = Loc.T("Sign In — TECHNO Electrical.Jo | Auto Park", "تسجيل الدخول — TECHNO Electrical.Jo | أوتو بارك");
             FormBorderStyle = FormBorderStyle.None;
             ClientSize = new Size(860, 520);
             BackColor = Theme.Border;
@@ -192,20 +193,30 @@ namespace AutoPark
                 g.FillEllipse(b, r.Width - 120, -60, 200, 200);
             }
 
-            var circle = new Rectangle((r.Width - 104) / 2, 110, 104, 104);
-            using (var b = new SolidBrush(Color.FromArgb(38, 255, 255, 255))) g.FillEllipse(b, circle);
-            using (var f = Theme.Icon(42f))
-                TextRenderer.DrawText(g, Icons.Car, f, circle, Color.White,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            var logoBox = new Rectangle((r.Width - 132) / 2, 72, 132, 152);
+            using (var path = Theme.Round(logoBox, 16))
+            using (var b = new SolidBrush(Color.White))
+                g.FillPath(b, path);
+            if (BrandAssets.Logo != null)
+            {
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                int pad = 12;
+                float scale = Math.Min((float)(logoBox.Width - 2 * pad) / BrandAssets.Logo.Width, (float)(logoBox.Height - 2 * pad) / BrandAssets.Logo.Height);
+                int dw = (int)(BrandAssets.Logo.Width * scale);
+                int dh = (int)(BrandAssets.Logo.Height * scale);
+                g.DrawImage(BrandAssets.Logo, logoBox.X + (logoBox.Width - dw) / 2, logoBox.Y + (logoBox.Height - dh) / 2, dw, dh);
+            }
 
             var center = TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | (Loc.IsArabic ? TextFormatFlags.RightToLeft : TextFormatFlags.Default);
-            using (var f = Theme.Bold(22f))
-                TextRenderer.DrawText(g, Loc.T("Auto Park — Jordan", "أوتو بارك — الأردن"), f, new Rectangle(0, 236, r.Width, 44), Color.White, center);
-            using (var f = Theme.F(10.5f))
-                TextRenderer.DrawText(g, Loc.T("Automated Parking Management & Control", "نظام الإدارة والتحكم بالمواقف الآلية"), f, new Rectangle(0, 282, r.Width, 28),
-                    Color.FromArgb(205, 236, 239), center);
+            using (var f = Theme.Bold(19f))
+                TextRenderer.DrawText(g, BrandAssets.CompanyNameEn, f, new Rectangle(0, 240, r.Width, 38), Color.White, center);
+            using (var f = Theme.Semi(13.5f))
+                TextRenderer.DrawText(g, Loc.T("Auto Park — Smart Parking", "أوتو بارك — المواقف الذكية"), f, new Rectangle(0, 280, r.Width, 30), Color.FromArgb(225, 248, 250), center);
+            using (var f = Theme.F(10f))
+                TextRenderer.DrawText(g, Loc.T("Automated Parking Management & Control", "نظام الإدارة والتحكم بالمواقف الآلية"), f, new Rectangle(0, 314, r.Width, 26),
+                    Color.FromArgb(200, 236, 239), center);
             using (var f = Theme.F(9.5f))
-                TextRenderer.DrawText(g, "Siemens SIMATIC S7-1200 PLC Ready", f, new Rectangle(0, 314, r.Width, 24),
+                TextRenderer.DrawText(g, "Siemens SIMATIC S7-1200 PLC Ready", f, new Rectangle(0, 344, r.Width, 24),
                     Color.FromArgb(175, 220, 225), center);
         }
 

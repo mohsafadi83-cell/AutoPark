@@ -184,14 +184,31 @@ export const AppShell: React.FC = () => {
 
   const drawerContent = (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Box sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 1.5 }}>
-        <ParkingIcon color="primary" sx={{ fontSize: 32 }} />
+      <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        <Box
+          sx={{
+            bgcolor: '#ffffff',
+            borderRadius: 1.5,
+            p: 0.5,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+        >
+          <Box
+            component="img"
+            src="/techno_logo.png"
+            alt="TECHNO Electrical.Jo"
+            sx={{ height: 42, width: 'auto', display: 'block' }}
+          />
+        </Box>
         <Box>
-          <Typography variant="subtitle1" fontWeight={800} lineHeight={1.2}>
-            {t('app.name')}
+          <Typography variant="subtitle2" fontWeight={800} lineHeight={1.2}>
+            TECHNO Electrical.Jo
           </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {t('app.subtitle')}
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            {t('app.name')}
           </Typography>
         </Box>
       </Box>

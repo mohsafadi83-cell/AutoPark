@@ -1,7 +1,6 @@
 import {
   Brightness4 as DarkIcon,
   Brightness7 as LightIcon,
-  LocalParking as ParkingIcon,
   Translate as TranslateIcon,
   Visibility,
   VisibilityOff,
@@ -103,12 +102,32 @@ export const LoginPage: React.FC = () => {
 
       <Paper sx={{ p: 4, width: '100%', maxWidth: 440 }}>
         <Stack spacing={2.5} component="form" onSubmit={handleSubmit}>
-          <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="center">
-            <ParkingIcon color="primary" sx={{ fontSize: 40 }} />
-            <Box>
-              <Typography variant="h5">{t('app.name')}</Typography>
-              <Typography variant="caption" color="text.secondary">
-                {t('app.subtitle')}
+          <Stack direction="column" spacing={1.2} alignItems="center" justifyContent="center">
+            <Box
+              sx={{
+                bgcolor: '#ffffff',
+                borderRadius: 2.5,
+                px: 2,
+                py: 1.5,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Box
+                component="img"
+                src="/techno_logo.png"
+                alt="TECHNO Electrical.Jo"
+                sx={{ height: 84, width: 'auto', display: 'block' }}
+              />
+            </Box>
+            <Box textAlign="center">
+              <Typography variant="h6" fontWeight={800}>
+                TECHNO Electrical.Jo
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                {t('app.name')} — {t('app.subtitle')}
               </Typography>
             </Box>
           </Stack>

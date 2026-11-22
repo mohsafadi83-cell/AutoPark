@@ -49,7 +49,8 @@ namespace AutoPark
             _settings = settings;
             _user = user;
             Theme.PrepareForm(this);
-            Text = Loc.T("Auto Park — Automated Smart Parking System (Jordan)", "أوتو بارك — منظومة المواقف الذكية المؤتمتة (الأردن)");
+            if (BrandAssets.AppIcon != null) Icon = BrandAssets.AppIcon;
+            Text = Loc.T("TECHNO Electrical.Jo — Auto Park (Automated Smart Parking)", "TECHNO Electrical.Jo — أوتو بارك (منظومة المواقف الذكية المؤتمتة)");
             ClientSize = new Size(1280, 800);
             MinimumSize = new Size(1060, 680);
             WindowState = FormWindowState.Maximized;
@@ -115,7 +116,7 @@ namespace AutoPark
 
             var logo = new Panel();
             logo.Dock = startDock;
-            logo.Width = 54;
+            logo.Width = 196;
             logo.BackColor = Color.Transparent;
             logo.Paint += PaintLogo;
 
@@ -356,13 +357,27 @@ namespace AutoPark
         {
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            var r = new Rectangle(6, 14, 42, 42);
-            using (var path = Theme.Round(r, 10))
-            using (var b = new SolidBrush(Theme.Primary))
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            var r = new Rectangle(4, 10, 48, 50);
+            using (var path = Theme.Round(r, 8))
+            using (var b = new SolidBrush(Color.White))
+            using (var pen = new Pen(Theme.Border))
+            {
                 g.FillPath(b, path);
-            using (var f = Theme.Icon(18f))
-                TextRenderer.DrawText(g, Icons.Car, f, r, Color.White,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                g.DrawPath(pen, path);
+            }
+            if (BrandAssets.Logo != null)
+            {
+                int pad = 4;
+                float scale = Math.Min((float)(r.Width - 2 * pad) / BrandAssets.Logo.Width, (float)(r.Height - 2 * pad) / BrandAssets.Logo.Height);
+                int dw = (int)(BrandAssets.Logo.Width * scale);
+                int dh = (int)(BrandAssets.Logo.Height * scale);
+                g.DrawImage(BrandAssets.Logo, r.X + (r.Width - dw) / 2, r.Y + (r.Height - dh) / 2, dw, dh);
+            }
+            using (var f1 = Theme.Bold(10.5f))
+                TextRenderer.DrawText(g, "TECHNO", f1, new Rectangle(58, 15, 134, 22), Color.FromArgb(14, 52, 74), TextFormatFlags.Left | TextFormatFlags.NoPadding);
+            using (var f2 = Theme.Semi(8.2f))
+                TextRenderer.DrawText(g, "Electrical.Jo • AutoPark", f2, new Rectangle(58, 37, 136, 18), Theme.Muted, TextFormatFlags.Left | TextFormatFlags.NoPadding);
         }
     }
 }

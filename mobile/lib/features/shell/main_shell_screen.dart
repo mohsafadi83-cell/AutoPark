@@ -67,14 +67,40 @@ class _MainShellScreenState extends ConsumerState<MainShellScreen> {
       appBar: AppBar(
         title: Row(
           children: [
-            const Icon(
-              Icons.precision_manufacturing_rounded,
-              color: AppColors.primaryCyan,
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Image.asset(
+                'assets/images/techno_logo.png',
+                height: 28,
+                fit: BoxFit.contain,
+              ),
             ),
-            const SizedBox(width: 8),
-            Text(
-              l10n.appTitle,
-              style: const TextStyle(fontWeight: FontWeight.w800),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'TECHNO Electrical.Jo',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                  ),
+                  Text(
+                    l10n.appTitle,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      color: AppColors.primaryCyan,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

@@ -29,27 +29,39 @@ class SplashScreen extends StatelessWidget {
             children: [
               const Spacer(),
               Container(
-                padding: const EdgeInsets.all(22),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
                 decoration: BoxDecoration(
-                  color: AppColors.primaryCyan.withOpacity(0.14),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: AppColors.primaryCyan.withOpacity(0.5),
-                    width: 2,
-                  ),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.32),
+                      blurRadius: 24,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
                 ),
-                child: const Icon(
-                  Icons.precision_manufacturing_rounded,
-                  size: 64,
-                  color: AppColors.primaryCyan,
+                child: Image.asset(
+                  'assets/images/techno_logo.png',
+                  height: 112,
+                  fit: BoxFit.contain,
                 ),
               ),
               const SizedBox(height: 22),
               Text(
-                l10n.appTitle,
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                'TECHNO Electrical.Jo',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w800,
                       color: Colors.white,
+                      letterSpacing: 0.5,
+                    ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                l10n.appTitle,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primaryCyan,
                     ),
               ),
               const SizedBox(height: 6),

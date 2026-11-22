@@ -7,6 +7,8 @@ set CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe
 
 "%CSC%" -nologo -codepage:65001 -target:winexe -optimize+ ^
   -out:"..\AutoPark.exe" ^
+  -win32icon:"..\assets\techno_logo.ico" ^
+  -resource:"..\assets\techno_logo.png",techno_logo.png ^
   -r:System.dll -r:System.Core.dll -r:System.Data.dll -r:System.Drawing.dll -r:System.Windows.Forms.dll -r:System.Xml.dll ^
   *.cs
 

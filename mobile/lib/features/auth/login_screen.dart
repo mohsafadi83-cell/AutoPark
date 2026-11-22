@@ -98,14 +98,40 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       appBar: AppBar(
         title: Row(
           children: [
-            const Icon(
-              Icons.precision_manufacturing_rounded,
-              color: AppColors.primaryCyan,
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Image.asset(
+                'assets/images/techno_logo.png',
+                height: 28,
+                fit: BoxFit.contain,
+              ),
             ),
-            const SizedBox(width: 8),
-            Text(
-              l10n.appTitle,
-              style: const TextStyle(fontWeight: FontWeight.w800),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'TECHNO Electrical.Jo',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+                  ),
+                  Text(
+                    l10n.appTitle,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      color: AppColors.primaryCyan,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -142,16 +168,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         Row(
                           children: [
                             Container(
-                              padding: const EdgeInsets.all(12),
+                              padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
-                                color: AppColors.primaryCyan
-                                    .withOpacity(0.15),
+                                color: Colors.white,
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: const Icon(
-                                Icons.lock_person_rounded,
-                                color: AppColors.primaryCyan,
-                                size: 28,
+                              child: Image.asset(
+                                'assets/images/techno_logo.png',
+                                height: 50,
+                                fit: BoxFit.contain,
                               ),
                             ),
                             const SizedBox(width: 14),
@@ -159,6 +184,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
+                                  const Text(
+                                    'TECHNO Electrical.Jo',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.primaryCyan,
+                                    ),
+                                  ),
                                   Text(
                                     l10n.loginTitle,
                                     style: Theme.of(context)
