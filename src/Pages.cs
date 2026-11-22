@@ -71,20 +71,25 @@ namespace AutoPark
                 }
             };
 
+            bool isRestrictedEmployee = shell.CurrentUser.Role == "EMPLOYEE" || shell.CurrentUser.Role == "PARKING_ATTENDANT";
+
             var btnSensors = MakeActionBtn(Loc.T("Sensors", "مراقبة الحساسات"), Icons.Plug, Theme.Surface, Theme.SurfaceHover, 120, true);
             btnSensors.Click += delegate { shell.Navigate(new SensorMonitorPage(shell), Loc.T("Live Sensor & Limit-Switch Monitor", "مراقبة الحساسات ومفاتيح النهاية الحية (Status Monitor)")); };
 
             var btnManual = MakeActionBtn(Loc.T("Manual", "الصيانة اليدوية"), Icons.Lock, Theme.Surface, Theme.SurfaceHover, 118, true);
-            btnManual.Enabled = shell.CurrentUser.CanMaintenance;
+            btnManual.Enabled = shell.CurrentUser.CanMaintenance && !isRestrictedEmployee;
             btnManual.Click += delegate { shell.Navigate(new ManualMaintenancePage(shell), Loc.T("Safe Manual & Maintenance Mode (Hold-to-Run)", "وضع الصيانة والتحكم اليدوي الآمن (Hold-to-Run)")); };
 
             var btnVehicles = MakeActionBtn(Loc.T("Vehicles", "المركبات"), Icons.Car, Theme.Surface, Theme.SurfaceHover, 102, true);
+            btnVehicles.Enabled = !isRestrictedEmployee;
             btnVehicles.Click += delegate { shell.Navigate(new VehiclesPage(shell), Loc.T("Registered Vehicles Management", "إدارة المركبات المسجلة — الأردن")); };
 
             var btnAlarms = MakeActionBtn(Loc.T("Alarms", "التنبيهات"), Icons.Warning, Theme.Surface, Theme.SurfaceHover, 102, true);
+            btnAlarms.Enabled = !isRestrictedEmployee;
             btnAlarms.Click += delegate { shell.Navigate(new AlarmsPage(shell), Loc.T("Industrial Alarms & Faults", "التنبيهات والأعطال الصناعية")); };
 
             var btnHistory = MakeActionBtn(Loc.T("History", "سجل الأوامر"), Icons.History, Theme.Surface, Theme.SurfaceHover, 106, true);
+            btnHistory.Enabled = !isRestrictedEmployee;
             btnHistory.Click += delegate { shell.Navigate(new CommandsHistoryPage(shell), Loc.T("Industrial Commands & Audit Log", "سجل الأوامر الصناعية والتدقيق")); };
 
             var btnDevices = MakeActionBtn(Loc.T("MAC Devices", "أجهزة MAC"), Icons.User, Theme.Surface, Theme.SurfaceHover, 116, true);
@@ -96,12 +101,15 @@ namespace AutoPark
             btnSettings.Click += delegate { shell.Navigate(new PlcSettingsPage(shell), Loc.T("Industrial PLC Integration Settings (settings.ini)", "إعدادات الربط الصناعي للمتحكم وعناوين الـ PLC (settings.ini)")); };
 
             // In WinForms Dock, last added DockStyle.Left/Right appears closest to the edge!
-            topBar.Controls.Add(Theme.Holder(btnSettings, startDock, 120, new Padding(4, 2, 4, 2)));
-            topBar.Controls.Add(Theme.Holder(btnDevices, startDock, 118, new Padding(4, 2, 4, 2)));
-            topBar.Controls.Add(Theme.Holder(btnHistory, startDock, 108, new Padding(4, 2, 4, 2)));
-            topBar.Controls.Add(Theme.Holder(btnAlarms, startDock, 102, new Padding(4, 2, 4, 2)));
-            topBar.Controls.Add(Theme.Holder(btnVehicles, startDock, 104, new Padding(4, 2, 4, 2)));
-            topBar.Controls.Add(Theme.Holder(btnManual, startDock, 118, new Padding(4, 2, 4, 2)));
+            if (!isRestrictedEmployee)
+            {
+                topBar.Controls.Add(Theme.Holder(btnSettings, startDock, 120, new Padding(4, 2, 4, 2)));
+                topBar.Controls.Add(Theme.Holder(btnDevices, startDock, 118, new Padding(4, 2, 4, 2)));
+                topBar.Controls.Add(Theme.Holder(btnHistory, startDock, 108, new Padding(4, 2, 4, 2)));
+                topBar.Controls.Add(Theme.Holder(btnAlarms, startDock, 102, new Padding(4, 2, 4, 2)));
+                topBar.Controls.Add(Theme.Holder(btnVehicles, startDock, 104, new Padding(4, 2, 4, 2)));
+                topBar.Controls.Add(Theme.Holder(btnManual, startDock, 118, new Padding(4, 2, 4, 2)));
+            }
             topBar.Controls.Add(Theme.Holder(btnSensors, startDock, 122, new Padding(4, 2, 4, 2)));
             topBar.Controls.Add(Theme.Holder(btnRetrieve, startDock, 130, new Padding(4, 2, 4, 2)));
             topBar.Controls.Add(Theme.Holder(btnPark, startDock, 126, new Padding(0, 2, 4, 2)));

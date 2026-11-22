@@ -168,6 +168,7 @@ const en = {
     SUPER_ADMIN: 'Super admin',
     SYSTEM_ADMIN: 'System admin',
     OPERATOR: 'Operator',
+    EMPLOYEE: 'Employee (Quick Ops, Map, Live Monitor, Dashboard)',
     PARKING_ATTENDANT: 'Parking attendant',
     MAINTENANCE_ENGINEER: 'Maintenance engineer',
     CUSTOMER: 'Customer',

@@ -170,6 +170,7 @@ const ar: TranslationShape = {
     SUPER_ADMIN: 'مدير أعلى',
     SYSTEM_ADMIN: 'مدير النظام',
     OPERATOR: 'مشغّل',
+    EMPLOYEE: 'موظف (العمليات السريعة + الخريطة + المراقبة الحية + الداش بورد)',
     PARKING_ATTENDANT: 'موظف مواقف',
     MAINTENANCE_ENGINEER: 'مهندس صيانة',
     CUSTOMER: 'عميل',

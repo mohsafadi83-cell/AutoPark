@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/models/models.dart';
 import '../../core/network/api_error.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/theme/app_theme.dart';
@@ -284,35 +285,40 @@ class _ProfileAndMoreScreenState extends ConsumerState<ProfileAndMoreScreen> {
         Card(
           child: Column(
             children: [
-              ListTile(
-                leading: const Icon(
-                  Icons.directions_car_filled_rounded,
-                  color: AppColors.primaryCyan,
-                ),
-                title: Text(l10n.vehiclesScreenTitle),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const VehiclesScreen(),
+              if (user?.canManageVehicles ?? false) ...[
+                ListTile(
+                  leading: const Icon(
+                    Icons.directions_car_filled_rounded,
+                    color: AppColors.primaryCyan,
+                  ),
+                  title: Text(l10n.vehiclesScreenTitle),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const VehiclesScreen(),
+                    ),
                   ),
                 ),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(
-                  Icons.history_rounded,
-                  color: AppColors.primaryCyan,
-                ),
-                title: Text(l10n.historyScreenTitle),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const HistoryScreen(),
-                  ),
-                ),
-              ),
-              if (user?.canMonitorSystem ?? false) ...[
                 const Divider(height: 1),
+              ],
+              if ((user?.hasPermission(Permission.historyViewOwn) ?? false) ||
+                  (user?.canViewAllHistory ?? false)) ...[
+                ListTile(
+                  leading: const Icon(
+                    Icons.history_rounded,
+                    color: AppColors.primaryCyan,
+                  ),
+                  title: Text(l10n.historyScreenTitle),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const HistoryScreen(),
+                    ),
+                  ),
+                ),
+                const Divider(height: 1),
+              ],
+              if (user?.canMonitorSystem ?? false) ...[
                 ListTile(
                   leading: const Icon(
                     Icons.sensors_rounded,
@@ -326,8 +332,8 @@ class _ProfileAndMoreScreenState extends ConsumerState<ProfileAndMoreScreen> {
                     ),
                   ),
                 ),
+                const Divider(height: 1),
               ],
-              const Divider(height: 1),
               ListTile(
                 leading: const Icon(
                   Icons.notifications_active_outlined,
@@ -341,21 +347,23 @@ class _ProfileAndMoreScreenState extends ConsumerState<ProfileAndMoreScreen> {
                   ),
                 ),
               ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(
-                  Icons.settings_input_component_rounded,
-                  color: AppColors.primaryCyan,
-                ),
-                title: Text(l10n.industrialConfigTitle),
-                subtitle: Text(l10n.industrialConfigSubtitle),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const IndustrialConfigScreen(),
+              if (user?.canManageConfig ?? false) ...[
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(
+                    Icons.settings_input_component_rounded,
+                    color: AppColors.primaryCyan,
+                  ),
+                  title: Text(l10n.industrialConfigTitle),
+                  subtitle: Text(l10n.industrialConfigSubtitle),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const IndustrialConfigScreen(),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
         ),
