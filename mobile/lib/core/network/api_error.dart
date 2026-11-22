@@ -42,7 +42,28 @@ class ApiError implements Exception {
   }
 
   String localizedMessage(AppLocalizations l10n) {
+    final isAr = l10n.localeName.startsWith('ar');
     switch (code) {
+      case 'DEVICE_NOT_AUTHORIZED':
+        return isAr
+            ? 'عنوان MAC الخاص بجهازك غير متوافق مع قاعدة البيانات أو غير مسجّل للموظفين المصرّح لهم. يرجى التواصل مع مدير النظام لتسجيل جهازك.'
+            : 'Your device MAC address does not match any authorized device in the database. Please contact the system administrator.';
+      case 'DEVICE_USER_MISMATCH':
+        return isAr
+            ? 'عنوان MAC الخاص بجهازك غير متوافق مع هذا الحساب (الهاتف مسجّل باسم موظف آخر).'
+            : 'Your device MAC address does not match this account (registered to another employee).';
+      case 'DEVICE_REVOKED':
+        return isAr
+            ? 'تم إلغاء صلاحية هذا الهاتف من التحكم بالنظام من قبل الإدارة.'
+            : 'Access for this device has been revoked by administration.';
+      case 'DEVICE_CONTROL_DISABLED':
+        return isAr
+            ? 'هذا الجهاز غير مصرّح له بتحريك المواقف.'
+            : 'Control permission is disabled for this device.';
+      case 'ONLY_EMPLOYEES_ALLOWED':
+        return isAr
+            ? 'الدخول عبر التطبيق مقتصر على الموظفين المعرّفين في النظام فقط.'
+            : 'Access denied: Mobile app sign-in is restricted to registered employees only.';
       case 'SYSTEM_OFFLINE':
         return l10n.errSystemOffline;
       case 'SYSTEM_NOT_READY':

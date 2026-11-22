@@ -10,6 +10,7 @@ import '../models/models.dart';
 import '../network/api_client.dart';
 import '../notifications/local_notification_service.dart';
 import '../realtime/realtime_service.dart';
+import '../services/device_identity_service.dart';
 import '../storage/preferences_storage.dart';
 import '../storage/token_storage.dart';
 
@@ -165,8 +166,9 @@ class AppController extends StateNotifier<AppState> {
       final bio = await _prefs.getBiometricEnabled();
       final remember = await _prefs.getRememberMe();
       final hasPersisted = await _tokenStorage.hasPersistedSession();
-      final devId = await _prefs.getOrCreateDeviceId();
-      final devMac = await _prefs.getDeviceMac();
+      final identity = await DeviceIdentityService.resolve(_prefs);
+      final devId = identity.deviceId;
+      final devMac = identity.macAddress;
 
       _api.updateHost(host);
       _api.updateDeviceIdentity(deviceId: devId, deviceMac: devMac);

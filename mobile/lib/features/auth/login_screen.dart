@@ -19,7 +19,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _usernameCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
-  final _macCtrl = TextEditingController();
   bool _obscurePassword = true;
   bool _rememberMe = true;
   bool _submitting = false;
@@ -30,14 +29,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.initState();
     final st = ref.read(appControllerProvider);
     _rememberMe = st.rememberMe;
-    _macCtrl.text = st.deviceMac;
   }
 
   @override
   void dispose() {
     _usernameCtrl.dispose();
     _passwordCtrl.dispose();
-    _macCtrl.dispose();
     super.dispose();
   }
 
@@ -49,9 +46,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
     final l10n = AppLocalizations.of(context);
     try {
-      await ref
-          .read(appControllerProvider.notifier)
-          .setDeviceMac(_macCtrl.text.trim());
       await ref.read(appControllerProvider.notifier).login(
             username: _usernameCtrl.text.trim(),
             password: _passwordCtrl.text,
@@ -254,67 +248,82 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ? l10n.passwordRequired
                               : null,
                         ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _macCtrl,
-                          textDirection: TextDirection.ltr,
-                          decoration: InputDecoration(
-                            labelText: isArabic
-                                ? 'عنوان MAC Address للهاتف (اختياري)'
-                                : 'Phone MAC Address (Optional)',
-                            hintText: 'AA:BB:CC:DD:EE:FF',
-                            prefixIcon: const Icon(Icons.phonelink_lock_rounded),
-                          ),
-                        ),
-                        if (appState.deviceId.isNotEmpty) ...[
-                          const SizedBox(height: 8),
+                        if (appState.deviceMac.isNotEmpty ||
+                            appState.deviceId.isNotEmpty) ...[
+                          const SizedBox(height: 12),
                           Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 6,
+                              horizontal: 12,
+                              vertical: 10,
                             ),
                             decoration: BoxDecoration(
                               color: AppColors.primaryCyan.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                color: AppColors.primaryCyan.withOpacity(0.35),
+                                color: AppColors.primaryCyan.withOpacity(0.4),
                               ),
                             ),
                             child: Row(
                               children: [
                                 const Icon(
-                                  Icons.fingerprint_rounded,
-                                  size: 16,
+                                  Icons.phonelink_lock_rounded,
+                                  size: 20,
                                   color: AppColors.primaryCyan,
                                 ),
-                                const SizedBox(width: 6),
+                                const SizedBox(width: 10),
                                 Expanded(
-                                  child: Text(
-                                    isArabic
-                                        ? 'معرّف الهاتف: ${appState.deviceId}'
-                                        : 'Device ID: ${appState.deviceId}',
-                                    style: const TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w700,
-                                    ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        isArabic
+                                            ? 'عنوان MAC الجهاز (قراءة تلقائية)'
+                                            : 'Device MAC Address (Auto-Detected)',
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          color: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.color,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        appState.deviceMac.isNotEmpty
+                                            ? appState.deviceMac
+                                            : appState.deviceId,
+                                        textDirection: TextDirection.ltr,
+                                        style: const TextStyle(
+                                          fontSize: 13.5,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: 0.8,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                                 IconButton(
                                   visualDensity: VisualDensity.compact,
                                   tooltip: isArabic
-                                      ? 'نسخ معرّف الهاتف'
-                                      : 'Copy Device ID',
-                                  icon: const Icon(Icons.copy_rounded, size: 16),
+                                      ? 'نسخ عنوان MAC'
+                                      : 'Copy MAC Address',
+                                  icon:
+                                      const Icon(Icons.copy_rounded, size: 18),
                                   onPressed: () {
+                                    final valueToCopy =
+                                        appState.deviceMac.isNotEmpty
+                                            ? appState.deviceMac
+                                            : appState.deviceId;
                                     Clipboard.setData(
-                                      ClipboardData(text: appState.deviceId),
+                                      ClipboardData(text: valueToCopy),
                                     );
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text(
                                           isArabic
-                                              ? 'تم نسخ معرّف الهاتف لإرساله للإدارة'
-                                              : 'Device ID copied to send to system admin',
+                                              ? 'تم نسخ عنوان MAC ($valueToCopy) لإرساله لمدير النظام'
+                                              : 'Device MAC ($valueToCopy) copied for admin registration',
                                         ),
                                       ),
                                     );

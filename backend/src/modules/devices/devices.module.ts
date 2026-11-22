@@ -287,16 +287,19 @@ export class DevicesService {
       );
     }
 
-    const mac = normalizeMacAddress(params.rawMac);
-    const devId = normalizeDeviceId(params.rawDeviceId);
+    const mac = normalizeMacAddress(params.rawMac) ?? normalizeMacAddress(params.rawDeviceId);
+    const devId = normalizeDeviceId(params.rawDeviceId) ?? normalizeDeviceId(params.rawMac);
 
-    // Search by MAC Address or Device ID
+    // Search by MAC Address or Device ID in PostgreSQL authorized_devices table
     let matched: AuthorizedDeviceEntity | null = null;
     if (mac) {
       matched = await this.repo.findOne({ where: { macAddress: mac } });
     }
     if (!matched && devId) {
       matched = await this.repo.findOne({ where: { deviceId: devId } });
+    }
+    if (!matched && mac) {
+      matched = await this.repo.findOne({ where: { deviceId: mac } });
     }
 
     if (matched) {
@@ -361,7 +364,7 @@ export class DevicesService {
       const idHint = mac ? `MAC: ${mac}` : (devId ? `Device ID: ${devId}` : 'Unknown Device');
       throw new AppError(
         'DEVICE_NOT_AUTHORIZED',
-        `Unauthorized mobile device (${idHint}). Only registered employees can sign in via the app. / هذا الهاتف غير مسجّل للموظفين المصرّح لهم (${idHint}).`,
+        `Device MAC does not match authorized devices in database (${idHint}). / عنوان MAC الخاص بجهازك غير متوافق مع قاعدة البيانات (${idHint}).`,
         HttpStatus.FORBIDDEN,
       );
     }
