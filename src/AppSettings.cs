@@ -258,6 +258,7 @@ namespace AutoPark
                             if (val.Contains(":")) s.PlcPort = parsedPort;
                             break;
                         case "PORT": if (int.TryParse(val, out n)) s.PlcPort = n; break;
+                        case "HMIVNCIP": s.HmiVncIp = val; break;
                         case "VNCPASSWORD": s.VncPassword = val; break;
                         case "RACK": if (int.TryParse(val, out n)) s.Rack = n; break;
                         case "SLOT": if (int.TryParse(val, out n)) s.Slot = n; break;
@@ -340,6 +341,7 @@ namespace AutoPark
             sb.AppendLine("PlcModel=" + PlcModel);
             sb.AppendLine("IP=" + PlcIp);
             sb.AppendLine("Port=" + PlcPort);
+            sb.AppendLine("HmiVncIp=" + (HmiVncIp ?? "192.168.0.30:5900"));
             sb.AppendLine("VncPassword=" + (VncPassword ?? ""));
             sb.AppendLine("Rack=" + Rack);
             sb.AppendLine("Slot=" + Slot);

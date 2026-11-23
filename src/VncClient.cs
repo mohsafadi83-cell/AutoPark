@@ -837,10 +837,12 @@ namespace AutoPark
             {
                 try
                 {
-                    string baseUrl = "http://localhost:3000/api/v1";
+                    string baseUrl = string.IsNullOrEmpty(_shell.Settings.ApiBaseUrl) ? "http://192.168.0.30:3000/api/v1" : _shell.Settings.ApiBaseUrl.TrimEnd('/');
                     var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(baseUrl + "/industrial/s7/live");
                     req.Method = "GET";
-                    req.Timeout = 1400;
+                    req.Timeout = 2500;
+                    if (!string.IsNullOrEmpty(ParkState.Instance.BackendToken))
+                        req.Headers["Authorization"] = "Bearer " + ParkState.Instance.BackendToken;
                     using (var resp = (System.Net.HttpWebResponse)req.GetResponse())
                     using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
                     {
@@ -901,11 +903,13 @@ namespace AutoPark
             {
                 try
                 {
-                    string baseUrl = "http://localhost:3000/api/v1";
+                    string baseUrl = string.IsNullOrEmpty(_shell.Settings.ApiBaseUrl) ? "http://192.168.0.30:3000/api/v1" : _shell.Settings.ApiBaseUrl.TrimEnd('/');
                     var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(baseUrl + "/industrial/s7/write");
                     req.Method = "POST";
                     req.ContentType = "application/json; charset=utf-8";
                     req.Timeout = 3000;
+                    if (!string.IsNullOrEmpty(ParkState.Instance.BackendToken))
+                        req.Headers["Authorization"] = "Bearer " + ParkState.Instance.BackendToken;
                     int numVal = 1;
                     int.TryParse(valStr, out numVal);
                     string body = "{\"address\":\"" + addr + "\",\"value\":" + numVal + ",\"pulseMs\":" + pulseMs + "}";
@@ -945,9 +949,8 @@ namespace AutoPark
             string host;
             int port;
             RfBClient.ParseHostPort(_txtAddress.Text, 5900, out host, out port);
-            _shell.Settings.Protocol = "VNC";
-            _shell.Settings.PlcIp = host;
-            _shell.Settings.PlcPort = port;
+            // Preserve active PLC Protocol/IP (e.g. SIEMENS_S7 192.168.0.27:102) and store VNC separately
+            _shell.Settings.HmiVncIp = host + ":" + port;
             _shell.Settings.VncPassword = _txtPassword.Text;
             _shell.Settings.Save();
             _shell.UpdateFooterStatus();
