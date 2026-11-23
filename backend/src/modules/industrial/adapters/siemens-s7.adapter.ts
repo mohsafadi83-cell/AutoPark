@@ -95,6 +95,7 @@ export class SiemensS7Adapter implements IndustrialController {
   private conn: any = null;
   private pollTimer: NodeJS.Timeout | null = null;
   private polling = false;
+  private consecutivePollErrors = 0;
   private lastHeartbeatAt: Date | null = null;
   private lastValues: Record<string, unknown> = {};
   private prevM0_99: number[] | null = null;
@@ -239,13 +240,19 @@ export class SiemensS7Adapter implements IndustrialController {
         });
       });
 
+      this.consecutivePollErrors = 0;
       this.detectTagChanges(values);
       this.lastValues = values;
       this.lastHeartbeatAt = new Date();
       this.decodePlcAlarms(values);
       this.emit({ type: 'STATUS', status: await this.getSystemStatus() });
     } catch (e) {
-      this.emit({ type: 'LOG', level: 'warn', message: `S7-1200 poll error: ${(e as Error).message}` });
+      this.consecutivePollErrors += 1;
+      this.emit({ type: 'LOG', level: 'warn', message: `S7-1200 poll error (${this.consecutivePollErrors}/3): ${(e as Error).message}` });
+      if (this.consecutivePollErrors >= 3) {
+        this.consecutivePollErrors = 0;
+        await this.disconnect();
+      }
     } finally {
       this.polling = false;
     }

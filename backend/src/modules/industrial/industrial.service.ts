@@ -40,6 +40,8 @@ export class IndustrialIntegrationService implements OnModuleInit, OnModuleDestr
   private feedbackHandlers = new Set<CommandFeedbackHandler>();
   private sequenceCounter = Math.floor(Date.now() / 1000) % 1000000;
   private destroyed = false;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnecting = false;
 
   constructor(
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
@@ -454,10 +456,41 @@ export class IndustrialIntegrationService implements OnModuleInit, OnModuleDestr
       this.logger.warn(`Industrial controller (${settings.protocol}) not connected yet: ${(e as Error).message}`);
       this.lastControllerStatus = { ...OFFLINE_STATUS };
     }
+    this.startReconnectWatchdog();
     await this.broadcastStatus();
   }
 
+  private startReconnectWatchdog() {
+    if (this.reconnectTimer) {
+      clearInterval(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectTimer = setInterval(() => void this.tryReconnectIfOffline(), 10000);
+    this.reconnectTimer.unref?.();
+  }
+
+  private async tryReconnectIfOffline() {
+    if (this.destroyed || this.reconnecting || !this.controller || this.controller.isConnected()) return;
+    this.reconnecting = true;
+    try {
+      await this.controller.connect();
+      this.lastControllerStatus = await this.controller.getSystemStatus();
+      const activeAlarms = await this.controller.getActiveAlarms();
+      await this.alarms.syncControllerAlarms(activeAlarms);
+      this.logger.log(`Industrial controller (${this.controller.protocol}) reconnected automatically.`);
+      await this.broadcastStatus();
+    } catch {
+      // Controller still unreachable; next watchdog tick will retry
+    } finally {
+      this.reconnecting = false;
+    }
+  }
+
   private async teardownAdapter() {
+    if (this.reconnectTimer) {
+      clearInterval(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.unsubscribeController) {
       this.unsubscribeController();
       this.unsubscribeController = null;
