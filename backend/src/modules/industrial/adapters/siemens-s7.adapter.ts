@@ -234,8 +234,18 @@ export class SiemensS7Adapter implements IndustrialController {
     this.polling = true;
     try {
       const values = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            reject(new Error('S7-1200 readAllItems timeout (5000 ms)'));
+          }
+        }, 5000);
         this.conn.readAllItems((err: unknown, vals: Record<string, unknown>) => {
-          if (err) return reject(new Error(String(err)));
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (err) return reject(new Error(typeof err === 'object' ? JSON.stringify(err) : String(err)));
           resolve(vals || {});
         });
       });
@@ -850,9 +860,10 @@ export class SiemensS7Adapter implements IndustrialController {
         { host: this.host, port: this.port, rack: this.rack, slot: this.slot, timeout: 3000 },
         (err?: unknown) => {
           if (err) {
+            const errMsg = err instanceof Error ? err.message : typeof err === 'object' ? JSON.stringify(err) : String(err);
             return resolve({
               ok: false,
-              message: `SIMATIC S7-1200 (${this.host}:${this.port} rack=${this.rack} slot=${this.slot}) failed: ${String(err)}`,
+              message: `SIMATIC S7-1200 (${this.host}:${this.port} rack=${this.rack} slot=${this.slot}) failed: ${errMsg}`,
               latencyMs: null,
             });
           }

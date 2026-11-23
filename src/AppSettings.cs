@@ -44,7 +44,8 @@ namespace AutoPark
     {
         public string IniPath;
         public string Language = "en"; // Default primary language: English ("en" | "ar")
-        public string ApiBaseUrl = "http://localhost:3000/api/v1";
+        public string ApiBaseUrl = "http://192.168.0.30:3000/api/v1";
+        public static readonly string FallbackTunnelApiUrl = "https://plymouth-attached-cinema-muze.trycloudflare.com/api/v1";
         public string PublicServerIp = "46.185.128.165";
         public string Protocol = "SIEMENS_S7";
         public string PlcModel = "Siemens SIMATIC S7-1200 CPU 1212C (192.168.0.27:102)";
@@ -587,7 +588,7 @@ namespace AutoPark
         public bool EmergencyStop = false;
         public string BackendToken = "";
         public bool BackendConnected = false;
-        public string ApiBaseUrl = "http://localhost:3000/api/v1";
+        public string ApiBaseUrl = "http://192.168.0.30:3000/api/v1";
         public event Action Changed;
 
         ParkState()
@@ -762,7 +763,33 @@ namespace AutoPark
             {
                 if (!PingBackendHealth())
                 {
-                    TryAutoStartBackendProcess();
+                    string[] candidates = new string[]
+                    {
+                        "http://192.168.0.30:3000/api/v1",
+                        AppSettings.FallbackTunnelApiUrl,
+                        "http://localhost:3000/api/v1"
+                    };
+                    bool found = false;
+                    for (int i = 0; i < candidates.Length; i++)
+                    {
+                        if (string.Equals(ApiBaseUrl, candidates[i], StringComparison.OrdinalIgnoreCase)) continue;
+                        if (PingHealthUrl(candidates[i]))
+                        {
+                            ApiBaseUrl = candidates[i];
+                            BackendConnected = true;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found)
+                    {
+                        TryAutoStartBackendProcess();
+                        if (PingHealthUrl("http://localhost:3000/api/v1"))
+                        {
+                            ApiBaseUrl = "http://localhost:3000/api/v1";
+                            BackendConnected = true;
+                        }
+                    }
                 }
                 string body = "{\"username\":\"" + EscapeJson(username) + "\",\"password\":\"" + EscapeJson(password) + "\"}";
                 string json = HttpSend("POST", ApiBaseUrl + "/auth/login", body);
@@ -780,18 +807,46 @@ namespace AutoPark
             }
         }
 
-        public bool PingBackendHealth()
+        public bool PingHealthUrl(string baseUrl)
         {
             try
             {
-                string json = HttpSend("GET", ApiBaseUrl + "/health", null);
-                BackendConnected = json != null && json.Contains("\"ok\"");
-                return BackendConnected;
+                string json = HttpSend("GET", baseUrl.TrimEnd('/') + "/health", null);
+                return json != null && json.Contains("\"ok\"");
             }
             catch
             {
-                BackendConnected = false;
                 return false;
+            }
+        }
+
+        public bool PingBackendHealth()
+        {
+            BackendConnected = PingHealthUrl(ApiBaseUrl);
+            return BackendConnected;
+        }
+
+        public string GetApiRaw(string path)
+        {
+            try
+            {
+                return HttpSend("GET", ApiBaseUrl.TrimEnd('/') + path, null);
+            }
+            catch (Exception ex)
+            {
+                return "ERR:" + ex.Message;
+            }
+        }
+
+        public string PostApiRaw(string path, string jsonBody)
+        {
+            try
+            {
+                return HttpSend("POST", ApiBaseUrl.TrimEnd('/') + path, jsonBody ?? "{}");
+            }
+            catch (Exception ex)
+            {
+                return "ERR:" + ex.Message;
             }
         }
 
@@ -1216,7 +1271,7 @@ namespace AutoPark
         {
             var req = (HttpWebRequest)WebRequest.Create(url);
             req.Method = method;
-            req.Timeout = 3500;
+            req.Timeout = 5000;
             req.ContentType = "application/json; charset=utf-8";
             if (!string.IsNullOrEmpty(BackendToken))
                 req.Headers["Authorization"] = "Bearer " + BackendToken;

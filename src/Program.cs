@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Net;
 using System.Windows.Forms;
 
 namespace AutoPark
@@ -9,6 +10,11 @@ namespace AutoPark
         [STAThread]
         static int Main(string[] args)
         {
+            try
+            {
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | SecurityProtocolType.Tls;
+            }
+            catch { }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);

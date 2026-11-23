@@ -73,7 +73,10 @@ namespace AutoPark
 
             bool isRestrictedEmployee = shell.CurrentUser.Role == "EMPLOYEE" || shell.CurrentUser.Role == "PARKING_ATTENDANT";
 
-            var btnSensors = MakeActionBtn(Loc.T("Sensors", "مراقبة الحساسات"), Icons.Plug, Theme.Surface, Theme.SurfaceHover, 120, true);
+            var btnSystemCheck = MakeActionBtn(Loc.T("System Check", "فحص النظام"), Icons.Check, Theme.PrimarySoft, Theme.BlueSoft, 134, true);
+            btnSystemCheck.Click += delegate { shell.Navigate(new SystemCheckPage(shell), Loc.T("Full System Check — All Sensors & Machine Features", "الفحص الشامل للنظام — جميع الحساسات وميزات البرنامج والماكنة")); };
+
+            var btnSensors = MakeActionBtn(Loc.T("Sensors", "مراقبة الحساسات"), Icons.Plug, Theme.Surface, Theme.SurfaceHover, 114, true);
             btnSensors.Click += delegate { shell.Navigate(new SensorMonitorPage(shell), Loc.T("Live Sensor & Limit-Switch Monitor", "مراقبة الحساسات ومفاتيح النهاية الحية (Status Monitor)")); };
 
             var btnManual = MakeActionBtn(Loc.T("Manual", "الصيانة اليدوية"), Icons.Lock, Theme.Surface, Theme.SurfaceHover, 118, true);
@@ -110,9 +113,10 @@ namespace AutoPark
                 topBar.Controls.Add(Theme.Holder(btnVehicles, startDock, 104, new Padding(4, 2, 4, 2)));
                 topBar.Controls.Add(Theme.Holder(btnManual, startDock, 118, new Padding(4, 2, 4, 2)));
             }
-            topBar.Controls.Add(Theme.Holder(btnSensors, startDock, 122, new Padding(4, 2, 4, 2)));
-            topBar.Controls.Add(Theme.Holder(btnRetrieve, startDock, 130, new Padding(4, 2, 4, 2)));
-            topBar.Controls.Add(Theme.Holder(btnPark, startDock, 126, new Padding(0, 2, 4, 2)));
+            topBar.Controls.Add(Theme.Holder(btnSensors, startDock, 114, new Padding(4, 2, 4, 2)));
+            topBar.Controls.Add(Theme.Holder(btnSystemCheck, startDock, 134, new Padding(4, 2, 4, 2)));
+            topBar.Controls.Add(Theme.Holder(btnRetrieve, startDock, 126, new Padding(4, 2, 4, 2)));
+            topBar.Controls.Add(Theme.Holder(btnPark, startDock, 122, new Padding(0, 2, 4, 2)));
             topBar.Controls.Add(Theme.Holder(_btnEStop, endDock, 152, new Padding(4, 2, 4, 2)));
 
             // 2. KPI Strip (6 cards)
