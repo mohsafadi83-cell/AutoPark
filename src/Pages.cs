@@ -30,19 +30,28 @@ namespace AutoPark
             DockStyle startDock = Loc.IsArabic ? DockStyle.Right : DockStyle.Left;
             DockStyle endDock = Loc.IsArabic ? DockStyle.Left : DockStyle.Right;
 
-            // 1. Top Navigation & Action Bar
+            // 1. Top Navigation & Action Bar (wraps cleanly into 1-2 rows with zero clipping)
             var topBar = new Panel { Dock = DockStyle.Top, Height = 58, Padding = new Padding(0, 4, 0, 8) };
+            var navFlow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = Loc.IsArabic ? FlowDirection.RightToLeft : FlowDirection.LeftToRight,
+                WrapContents = true,
+                AutoScroll = false,
+                BackColor = Color.Transparent,
+                Padding = new Padding(0)
+            };
 
-            var btnPark = MakeActionBtn(Loc.T("Park Vehicle", "إيداع (Park)"), Icons.Park, Theme.Primary, Theme.PrimaryHover, 126);
+            var btnPark = MakeActionBtn(Loc.T("Park Vehicle", "إيداع (Park)"), Icons.Park, Theme.Primary, Theme.PrimaryHover, 118);
             btnPark.Enabled = shell.CurrentUser.CanControl;
             btnPark.Click += delegate { OpenOperationDialog("PARK", null); };
 
-            var btnRetrieve = MakeActionBtn(Loc.T("Retrieve", "استرجاع (Retrieve)"), Icons.Car, Theme.Blue, Color.FromArgb(29, 78, 216), 130);
+            var btnRetrieve = MakeActionBtn(Loc.T("Retrieve", "استرجاع (Retrieve)"), Icons.Car, Theme.Blue, Color.FromArgb(29, 78, 216), 116);
             btnRetrieve.Enabled = shell.CurrentUser.CanControl;
             btnRetrieve.Click += delegate { OpenOperationDialog("RETRIEVE", null); };
 
             // Main Emergency Stop / Recovery Button
-            _btnEStop = MakeActionBtn(Loc.T("🔴 E-Stop", "🔴 إيقاف طارئ"), Icons.Shield, Theme.Err, Color.FromArgb(185, 28, 28), 148, false);
+            _btnEStop = MakeActionBtn(Loc.T("🔴 E-Stop", "🔴 إيقاف طارئ"), Icons.Shield, Theme.Err, Color.FromArgb(185, 28, 28), 144, false);
             _btnEStop.ForeColor = Color.White;
             _btnEStop.Enabled = shell.CurrentUser.CanControl;
             _btnEStop.Click += delegate
@@ -73,51 +82,77 @@ namespace AutoPark
 
             bool isRestrictedEmployee = shell.CurrentUser.Role == "EMPLOYEE" || shell.CurrentUser.Role == "PARKING_ATTENDANT";
 
-            var btnSystemCheck = MakeActionBtn(Loc.T("System Check", "فحص النظام"), Icons.Check, Theme.PrimarySoft, Theme.BlueSoft, 134, true);
+            var btnSystemCheck = MakeActionBtn(Loc.T("System Check", "فحص النظام"), Icons.Check, Theme.PrimarySoft, Theme.BlueSoft, 122, true);
             btnSystemCheck.Click += delegate { shell.Navigate(new SystemCheckPage(shell), Loc.T("Full System Check — All Sensors & Machine Features", "الفحص الشامل للنظام — جميع الحساسات وميزات البرنامج والماكنة")); };
 
-            var btnSensors = MakeActionBtn(Loc.T("Sensors", "مراقبة الحساسات"), Icons.Plug, Theme.Surface, Theme.SurfaceHover, 114, true);
+            var btnClassicSim = MakeActionBtn(Loc.T("Classic Control", "كلاسيك كنترول"), Icons.Settings, Theme.AmberSoft, Theme.SurfaceHover, 132, true);
+            btnClassicSim.ForeColor = Theme.Amber;
+            btnClassicSim.Click += delegate { shell.Navigate(new ClassicControlSimulatorPage(shell), Loc.T("Classic Control Simulator — DOL / Fwd-Rev / Star-Delta / AutoPark", "محاكي الكلاسيك كنترول — DOL / عكس دوران / ستار دلتا / لوحة الماكنة")); };
+
+            var btnSensors = MakeActionBtn(Loc.T("Sensors", "مراقبة الحساسات"), Icons.Plug, Theme.Surface, Theme.SurfaceHover, 104, true);
             btnSensors.Click += delegate { shell.Navigate(new SensorMonitorPage(shell), Loc.T("Live Sensor & Limit-Switch Monitor", "مراقبة الحساسات ومفاتيح النهاية الحية (Status Monitor)")); };
 
-            var btnManual = MakeActionBtn(Loc.T("Manual", "الصيانة اليدوية"), Icons.Lock, Theme.Surface, Theme.SurfaceHover, 118, true);
+            var btnManual = MakeActionBtn(Loc.T("Manual", "الصيانة اليدوية"), Icons.Lock, Theme.Surface, Theme.SurfaceHover, 108, true);
             btnManual.Enabled = shell.CurrentUser.CanMaintenance && !isRestrictedEmployee;
             btnManual.Click += delegate { shell.Navigate(new ManualMaintenancePage(shell), Loc.T("Safe Manual & Maintenance Mode (Hold-to-Run)", "وضع الصيانة والتحكم اليدوي الآمن (Hold-to-Run)")); };
 
-            var btnVehicles = MakeActionBtn(Loc.T("Vehicles", "المركبات"), Icons.Car, Theme.Surface, Theme.SurfaceHover, 102, true);
+            var btnVehicles = MakeActionBtn(Loc.T("Vehicles", "المركبات"), Icons.Car, Theme.Surface, Theme.SurfaceHover, 96, true);
             btnVehicles.Enabled = !isRestrictedEmployee;
             btnVehicles.Click += delegate { shell.Navigate(new VehiclesPage(shell), Loc.T("Registered Vehicles Management", "إدارة المركبات المسجلة — الأردن")); };
 
-            var btnAlarms = MakeActionBtn(Loc.T("Alarms", "التنبيهات"), Icons.Warning, Theme.Surface, Theme.SurfaceHover, 102, true);
+            var btnAlarms = MakeActionBtn(Loc.T("Alarms", "التنبيهات"), Icons.Warning, Theme.Surface, Theme.SurfaceHover, 94, true);
             btnAlarms.Enabled = !isRestrictedEmployee;
             btnAlarms.Click += delegate { shell.Navigate(new AlarmsPage(shell), Loc.T("Industrial Alarms & Faults", "التنبيهات والأعطال الصناعية")); };
 
-            var btnHistory = MakeActionBtn(Loc.T("History", "سجل الأوامر"), Icons.History, Theme.Surface, Theme.SurfaceHover, 106, true);
+            var btnHistory = MakeActionBtn(Loc.T("History", "سجل الأوامر"), Icons.History, Theme.Surface, Theme.SurfaceHover, 96, true);
             btnHistory.Enabled = !isRestrictedEmployee;
             btnHistory.Click += delegate { shell.Navigate(new CommandsHistoryPage(shell), Loc.T("Industrial Commands & Audit Log", "سجل الأوامر الصناعية والتدقيق")); };
 
-            var btnDevices = MakeActionBtn(Loc.T("MAC Devices", "أجهزة MAC"), Icons.User, Theme.Surface, Theme.SurfaceHover, 116, true);
+            var btnDevices = MakeActionBtn(Loc.T("MAC Devices", "أجهزة MAC"), Icons.User, Theme.Surface, Theme.SurfaceHover, 110, true);
             btnDevices.Enabled = shell.CurrentUser.IsAdmin;
             btnDevices.Click += delegate { shell.Navigate(new DevicesManagementPage(shell), Loc.T("Employee Mobile Devices & MAC Address Access Control", "إدارة هواتف الموظفين وعناوين MAC Address وإلغاء الصلاحية")); };
 
-            var btnSettings = MakeActionBtn(Loc.T("PLC Settings", "إعدادات PLC"), Icons.Settings, Theme.Surface, Theme.SurfaceHover, 118, true);
+            var btnSettings = MakeActionBtn(Loc.T("PLC Settings", "إعدادات PLC"), Icons.Settings, Theme.Surface, Theme.SurfaceHover, 110, true);
             btnSettings.Enabled = shell.CurrentUser.IsAdmin;
             btnSettings.Click += delegate { shell.Navigate(new PlcSettingsPage(shell), Loc.T("Industrial PLC Integration Settings (settings.ini)", "إعدادات الربط الصناعي للمتحكم وعناوين الـ PLC (settings.ini)")); };
 
-            // In WinForms Dock, last added DockStyle.Left/Right appears closest to the edge!
+            Action<ModernButton, int> addNav = delegate (ModernButton b, int wBtn)
+            {
+                b.Width = wBtn;
+                b.Height = 40;
+                b.Margin = new Padding(0, 2, 6, 4);
+                navFlow.Controls.Add(b);
+            };
+
+            addNav(btnPark, 118);
+            addNav(btnRetrieve, 116);
+            addNav(btnSystemCheck, 122);
+            addNav(btnClassicSim, 132);
+            addNav(btnSensors, 104);
             if (!isRestrictedEmployee)
             {
-                topBar.Controls.Add(Theme.Holder(btnSettings, startDock, 120, new Padding(4, 2, 4, 2)));
-                topBar.Controls.Add(Theme.Holder(btnDevices, startDock, 118, new Padding(4, 2, 4, 2)));
-                topBar.Controls.Add(Theme.Holder(btnHistory, startDock, 108, new Padding(4, 2, 4, 2)));
-                topBar.Controls.Add(Theme.Holder(btnAlarms, startDock, 102, new Padding(4, 2, 4, 2)));
-                topBar.Controls.Add(Theme.Holder(btnVehicles, startDock, 104, new Padding(4, 2, 4, 2)));
-                topBar.Controls.Add(Theme.Holder(btnManual, startDock, 118, new Padding(4, 2, 4, 2)));
+                addNav(btnManual, 108);
+                addNav(btnVehicles, 96);
+                addNav(btnAlarms, 94);
+                addNav(btnHistory, 96);
+                addNav(btnDevices, 110);
+                addNav(btnSettings, 110);
             }
-            topBar.Controls.Add(Theme.Holder(btnSensors, startDock, 114, new Padding(4, 2, 4, 2)));
-            topBar.Controls.Add(Theme.Holder(btnSystemCheck, startDock, 134, new Padding(4, 2, 4, 2)));
-            topBar.Controls.Add(Theme.Holder(btnRetrieve, startDock, 126, new Padding(4, 2, 4, 2)));
-            topBar.Controls.Add(Theme.Holder(btnPark, startDock, 122, new Padding(0, 2, 4, 2)));
-            topBar.Controls.Add(Theme.Holder(_btnEStop, endDock, 152, new Padding(4, 2, 4, 2)));
+
+            topBar.Controls.Add(navFlow);
+            topBar.Controls.Add(Theme.Holder(_btnEStop, endDock, 148, new Padding(4, 2, 4, 8)));
+
+            // Auto-adjust topBar height if buttons wrap to a second row on smaller screens
+            topBar.Resize += delegate
+            {
+                int maxBottom = 46;
+                foreach (Control c in navFlow.Controls)
+                {
+                    if (c.Bottom + 6 > maxBottom) maxBottom = c.Bottom + 6;
+                }
+                int desired = Math.Max(54, Math.Min(108, maxBottom + 10));
+                if (topBar.Height != desired) topBar.Height = desired;
+            };
 
             // 2. KPI Strip (6 cards)
             var kpiStrip = new TableLayoutPanel
