@@ -605,7 +605,8 @@ export class SiemensS7Adapter implements IndustrialController {
       return { ok: true, action, message: 'تم إرسال أمر إرجاع المنصة (Return Park) إلى الـ PLC.' };
     }
 
-    // SAFE_RESET: pulse ParkDB.Reset ONLY (NEVER force-write Alarm Word = 0!)
+    // SAFE_RESET: pulse ParkDB.Reset + clear Reset merker %M0.5 (matches HMI Button_25 Press; never force-writes Alarm Word!)
+    await this.tryWriteLogicalTag('reset_m_tag', false);
     await this.tryWriteLogicalTag('reset_command_tag', true, 400);
     await this.tryWriteLogicalTag('obstacle_reset_tag', true, 400);
     this.decodePlcAlarms(this.lastValues);
@@ -645,28 +646,52 @@ export class SiemensS7Adapter implements IndustrialController {
 
     if (controlKey === 'manual_mode_tag') {
       this.softManualMode = active;
-      if (active) await this.tryWriteLogicalTag('auto_mode_tag', false);
+      await this.tryWriteLogicalTag('user_logoff_tag', false);
+      if (active) {
+        await this.tryWriteLogicalTag('auto_mode_tag', false);
+        await this.tryWriteLogicalTag('sim_manual_tag', false);
+      } else {
+        await this.tryWriteLogicalTag('manual_action_tag', false);
+      }
       await this.tryWriteLogicalTag('manual_mode_tag', active);
       return { ok: true, controlKey, active, message: active ? 'تم تفعيل الوضع اليدوي (Manual Mode)' : 'تم إيقاف الوضع اليدوي' };
     }
 
     if (controlKey === 'auto_mode_tag') {
       this.softManualMode = !active;
-      if (active) await this.tryWriteLogicalTag('manual_mode_tag', false);
+      await this.tryWriteLogicalTag('user_logoff_tag', false);
+      if (active) {
+        await this.tryWriteLogicalTag('manual_mode_tag', false);
+        await this.tryWriteLogicalTag('manual_action_tag', false);
+        await this.tryWriteLogicalTag('sim_manual_tag', false);
+      }
       await this.tryWriteLogicalTag('auto_mode_tag', active);
       return { ok: true, controlKey, active, message: active ? 'تم تفعيل الوضع التلقائي (Auto Mode)' : 'تم إيقاف الوضع التلقائي' };
     }
 
-    // Strict hydraulic UP/DOWN interlock
-    if (controlKey === 'man_up_tag' && active) {
-      await this.tryWriteLogicalTag('man_down_tag', false);
-    } else if (controlKey === 'man_down_tag' && active) {
-      await this.tryWriteLogicalTag('man_up_tag', false);
-      await this.tryWriteLogicalTag('man_pump_tag', false);
+    // Strict hydraulic UP/DOWN + Cutoff interlock (matches TIA Portal HMI Switch_4 / Switch_5)
+    if (controlKey === 'man_up_tag') {
+      if (active) await this.tryWriteLogicalTag('man_down_tag', false);
+      await this.tryWriteLogicalTag('man_cutoff_tag', false);
+    } else if (controlKey === 'man_down_tag') {
+      if (active) {
+        await this.tryWriteLogicalTag('man_up_tag', false);
+        await this.tryWriteLogicalTag('man_pump_tag', false);
+      }
+      await this.tryWriteLogicalTag('man_cutoff_tag', false);
     }
 
     const pulseMs = controlKey === 'maintenance_reset_tag' ? 400 : undefined;
     await this.tryWriteLogicalTag(controlKey, active, pulseMs);
+
+    // TIA Portal HMI Pages 9-15: Stoppers S1-S4 (Man_LQ1..4) and Lanes L1-L4 (Man_L1..4) also set/reset manual_action (%M0.3)
+    const needsManualAction = new Set([
+      'man_s1_tag', 'man_s2_tag', 'man_s3_tag', 'man_s4_tag',
+      'man_l1_tag', 'man_l2_tag', 'man_l3_tag', 'man_l4_tag',
+    ]);
+    if (needsManualAction.has(controlKey)) {
+      await this.tryWriteLogicalTag('manual_action_tag', active);
+    }
     return {
       ok: true,
       controlKey,
