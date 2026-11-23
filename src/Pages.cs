@@ -89,9 +89,9 @@ namespace AutoPark
             btnClassicSim.ForeColor = Theme.Amber;
             btnClassicSim.Click += delegate { shell.Navigate(new ClassicControlSimulatorPage(shell), Loc.T("Classic Control Simulator — DOL / Fwd-Rev / Star-Delta / AutoPark", "محاكي الكلاسيك كنترول — DOL / عكس دوران / ستار دلتا / لوحة الماكنة")); };
 
-            var btnVnc = MakeActionBtn(Loc.T("HMI VNC", "شاشة VNC"), Icons.Plug, Theme.BlueSoft, Theme.SurfaceHover, 108, true);
+            var btnVnc = MakeActionBtn(Loc.T("Direct HMI", "شاشة الماكنة"), Icons.Plug, Theme.BlueSoft, Theme.SurfaceHover, 114, true);
             btnVnc.ForeColor = Theme.Blue;
-            btnVnc.Click += delegate { shell.Navigate(new VncViewerPage(shell), Loc.T("HMI Screen Viewer (VNC — 192.168.0.30:5900)", "شاشة الماكنة المباشرة (VNC — 192.168.0.30:5900)")); };
+            btnVnc.Click += delegate { shell.Navigate(new VncViewerPage(shell), Loc.T("Standalone Direct HMI Console (No VNC Required)", "شاشة الماكنة المباشرة — تشغيل مستقل بدون VNC")); };
 
             var btnSensors = MakeActionBtn(Loc.T("Sensors", "مراقبة الحساسات"), Icons.Plug, Theme.Surface, Theme.SurfaceHover, 104, true);
             btnSensors.Click += delegate { shell.Navigate(new SensorMonitorPage(shell), Loc.T("Live Sensor & Limit-Switch Monitor", "مراقبة الحساسات ومفاتيح النهاية الحية (Status Monitor)")); };

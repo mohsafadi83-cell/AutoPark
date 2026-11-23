@@ -248,7 +248,10 @@ namespace AutoPark
                     int n;
                     switch (key.ToUpperInvariant())
                     {
-                        case "PROTOCOL": s.Protocol = val.ToUpperInvariant(); break;
+                        case "PROTOCOL":
+                            string pVal = val.ToUpperInvariant();
+                            s.Protocol = (pVal == "VNC") ? "SIEMENS_S7" : pVal;
+                            break;
                         case "PLCMODEL": s.PlcModel = val; break;
                         case "IP":
                             string parsedHost;
@@ -769,7 +772,8 @@ namespace AutoPark
                     {
                         "http://192.168.0.30:3000/api/v1",
                         AppSettings.FallbackTunnelApiUrl,
-                        "http://localhost:3000/api/v1"
+                        "http://localhost:3000/api/v1",
+                        "http://localhost:5173/api/v1"
                     };
                     bool found = false;
                     for (int i = 0; i < candidates.Length; i++)
