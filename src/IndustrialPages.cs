@@ -596,7 +596,7 @@ namespace AutoPark
             modeBar.Controls.Add(Theme.Holder(_btnModeAuto, startDock, 220, new Padding(6, 2, 6, 2)));
             modeBar.Controls.Add(Theme.Holder(btnStopAll, endDock, 195, new Padding(6, 2, 6, 2)));
 
-            _controlsContainer = new Panel { Dock = DockStyle.Fill, Enabled = false };
+            _controlsContainer = new Panel { Dock = DockStyle.Top, Height = 415, Enabled = false };
             var split = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -707,6 +707,24 @@ namespace AutoPark
             split.Controls.Add(slotsCard, 1, 0);
             _controlsContainer.Controls.Add(split);
 
+            // Merged Live Sensors Panel directly below Manual Controls (always live & enabled even in Auto Mode)
+            var sensorDivider = new Panel { Dock = DockStyle.Top, Height = 36, Padding = new Padding(6, 10, 6, 4) };
+            var lblSensorsHeader = Theme.Label(
+                Loc.T("📡 Live PLC Sensors, Physical Inputs (I0.0–I3.7) & Limit Switches (Real-Time Monitor):",
+                      "📡 الحساسات الحية للـ PLC والمداخل الفيزيائية (I0.0–I3.7) وحساسات حدود الطوابق (مراقبة مباشرة):"),
+                Theme.Bold(11f), Theme.Primary);
+            lblSensorsHeader.Dock = DockStyle.Fill;
+            sensorDivider.Controls.Add(lblSensorsHeader);
+
+            var embeddedSensors = new SensorMonitorPage(shell)
+            {
+                Dock = DockStyle.Top,
+                Height = 900,
+                AutoScroll = false
+            };
+
+            Controls.Add(embeddedSensors);
+            Controls.Add(sensorDivider);
             Controls.Add(_controlsContainer);
             Controls.Add(modeBar);
             Controls.Add(warnBar);

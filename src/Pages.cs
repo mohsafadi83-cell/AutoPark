@@ -98,7 +98,7 @@ namespace AutoPark
 
             var btnManual = MakeActionBtn(Loc.T("Manual", "الصيانة اليدوية"), Icons.Lock, Theme.Surface, Theme.SurfaceHover, 108, true);
             btnManual.Enabled = shell.CurrentUser.CanMaintenance && !isRestrictedEmployee;
-            btnManual.Click += delegate { shell.Navigate(new ManualMaintenancePage(shell), Loc.T("Manual & Maintenance Mode (Toggle)", "وضع الصيانة والتحكم اليدوي (Toggle)")); };
+            btnManual.Click += delegate { shell.Navigate(new ManualMaintenancePage(shell), Loc.T("Manual Controls & Live Sensors", "التحكم اليدوي والحساسات الحية")); };
 
             var btnVehicles = MakeActionBtn(Loc.T("Vehicles", "المركبات"), Icons.Car, Theme.Surface, Theme.SurfaceHover, 96, true);
             btnVehicles.Enabled = !isRestrictedEmployee;
