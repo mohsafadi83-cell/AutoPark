@@ -38,6 +38,8 @@ export class HealthController {
       mode: this.cfg.mode,
       adapter: st.adapter,
       controllerConnected: st.controllerConnected,
+      uptimeSeconds: Math.floor(process.uptime()),
+      memoryRssMb: Math.round((process.memoryUsage().rss / (1024 * 1024)) * 10) / 10,
       cache: {
         backend: cacheStats.backend,
         redisConnected: cacheStats.redisConnected,

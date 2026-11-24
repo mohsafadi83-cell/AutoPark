@@ -46,6 +46,21 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   async handleConnection(client: Socket) {
     try {
+      // In LIVE mode, enforce CORS origin allowlist for browser clients (native mobile/desktop clients have no Origin header)
+      const origin = client.handshake.headers?.origin as string | undefined;
+      if (
+        this.cfg.mode !== 'SIMULATION' &&
+        origin &&
+        this.cfg.corsOrigins.length > 0 &&
+        !this.cfg.corsOrigins.includes('*') &&
+        !this.cfg.corsOrigins.includes(origin)
+      ) {
+        this.logger.warn(`Rejected WebSocket connection from disallowed origin: ${origin}`);
+        client.emit('auth.error', { message: 'Origin not allowed' });
+        client.disconnect(true);
+        return;
+      }
+
       const rawToken =
         (client.handshake.auth?.token as string) ||
         (client.handshake.headers?.authorization?.replace(/^Bearer\s+/i, '') as string);

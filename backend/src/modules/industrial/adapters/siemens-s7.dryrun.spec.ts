@@ -368,4 +368,24 @@ describe('SiemensS7Adapter — Safe Dry-Run Simulation (ZERO Physical Movement)'
     expect(writes).toContain('DB2,X10.0=true');
     expect(writes.some((w) => w.startsWith('DB2,W8='))).toBe(false);
   });
+
+  test('RETURN_PARK executes exact TIA Portal Page 104 Step 2 sequence (Auto_DB=true, M10.1=true, DB2,X5.6=false)', async () => {
+    adapter.clearDryRunWrites();
+    await adapter.emergencyRecovery('RETURN_PARK');
+    expect(adapter.getDryRunWrites().map((w) => `${w.address}=${w.value}`)).toEqual([
+      'DB1,X0.3=true',
+      'M10.1=true',
+      'DB2,X5.6=false',
+    ]);
+  });
+
+  test('writePlcTag coerces integer 1/0 to native boolean true/false on S7 bit addresses', async () => {
+    adapter.clearDryRunWrites();
+    await adapter.writePlcTag('M0.4', 1);
+    await adapter.writePlcTag('M0.4', 0);
+    expect(adapter.getDryRunWrites().map((w) => `${w.address}=${typeof w.value}:${w.value}`)).toEqual([
+      'M0.4=boolean:true',
+      'M0.4=boolean:false',
+    ]);
+  });
 });
