@@ -763,6 +763,35 @@ namespace AutoPark
             _btnCancelStep.SetBounds(394, 368, 188, 46);
             _btnCancelStep.Click += CancelCurrentOperation;
 
+            var btnReturnGround = new ModernButton
+            {
+                Text = Loc.T("⬇ Return Lift to Ground Floor (P1)", "⬇ إرجاع المصعد للطابق الأرضي (الوضع الافتراضي P1)"),
+                BaseColor = Theme.Amber,
+                HoverColor = Color.FromArgb(180, 83, 9),
+                ForeColor = Color.White
+            };
+            btnReturnGround.SetBounds(22, 424, 386, 40);
+            btnReturnGround.Click += delegate
+            {
+                var ps = ParkState.Instance;
+                if (ps.EmergencyStop || ps.Sensors.EmergencyPhysical)
+                {
+                    Loc.ShowMsg("Cannot lower lift while Emergency Stop is active!", "لا يمكن إنزال المصعد أثناء تفعيل إيقاف الطوارئ!", "Safety", "أمان", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                _lblStepStatus.ForeColor = Theme.Amber;
+                _lblStepStatus.Text = Loc.T("⬇ Returning lift to Ground Floor (P1 — Step 2: M10.1=1, DB2,X5.6=0)...", "⬇ جاري إرجاع المصعد إلى الطابق الأرضي (الوضع الافتراضي P1 — M10.1=1)...");
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                {
+                    ps.SendPlcWriteBool("DB1,X0.3", true, 0);   // Auto_DB = 1
+                    ps.SendPlcWriteBool("M10.1", true, 0);      // SetBit(Park_IN_Step2_Start)
+                    ps.SendPlcWriteBool("DB2,X5.6", false, 0);  // ResetBit(Park_Step2_Ready)
+                    ps.SendRecoveryAction("RETURN_PARK");
+                });
+                ps.RecordLocalAudit("RETURN_GROUND_P1", _chosenSpace != null ? _chosenSpace.SpaceNumber : "LIFT",
+                    Loc.T("Return lift to Ground Floor (P1)", "إرجاع المصعد للطابق الأرضي (P1)"), Loc.UserDisplay(_shell.CurrentUser));
+            };
+
             var btnClose = new ModernButton
             {
                 Text = Loc.T("Close", "إغلاق"),
@@ -771,10 +800,10 @@ namespace AutoPark
                 ForeColor = Theme.Ink,
                 BorderColor = Theme.Border
             };
-            btnClose.SetBounds(220, 426, 180, 38);
+            btnClose.SetBounds(420, 424, 162, 40);
             btnClose.Click += delegate { Close(); };
 
-            card.Controls.AddRange(new Control[] { title, lblSelect, _cmbVehicle, lblManual, _txtPlate, _radMyCar, _radOtherCar, _lblElevatorPos, _lblStepStatus, _progress, _btnExecute, _btnCancelStep, btnClose });
+            card.Controls.AddRange(new Control[] { title, lblSelect, _cmbVehicle, lblManual, _txtPlate, _radMyCar, _radOtherCar, _lblElevatorPos, _lblStepStatus, _progress, _btnExecute, _btnCancelStep, btnReturnGround, btnClose });
             Controls.Add(card);
 
             _timer = new Timer { Interval = 750 };

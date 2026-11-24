@@ -784,10 +784,10 @@ export class SiemensS7Adapter implements IndustrialController {
       this.softEmergencyStop = false;
       this.softEmergencyDuringMove = false;
       await this.tryWriteLogicalTag('auto_mode_tag', true);
-      await this.tryWriteLogicalTag('step2_ready_tag', true, 400);
-      await this.tryWriteLogicalTag('step2_start_tag', true, 400);
+      await this.tryWriteLogicalTag('step2_start_tag', true);
+      await this.tryWriteLogicalTag('step2_ready_tag', false);
       this.decodePlcAlarms(this.lastValues);
-      return { ok: true, action, message: 'تم إرسال أمر إرجاع المنصة (Return Park) إلى الـ PLC.' };
+      return { ok: true, action, message: 'تم إرسال أمر إرجاع المصعد للطابق الأرضي (Return Park — M10.1=1, DB2,X5.6=0).' };
     }
 
     // SAFE_RESET: pulse ParkDB.Reset + clear Reset merker %M0.5 (matches HMI Button_25 Press; never force-writes Alarm Word!)

@@ -127,28 +127,70 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
               ),
               const SizedBox(height: 8),
               // 4-Color Legend Bar matching employee parking rules (fully bilingual)
-              Builder(
+                Builder(
                 builder: (ctx) {
                   final isAr = Localizations.localeOf(ctx).languageCode == 'ar';
-                  return Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _ColorLegendPill(
-                        color: const Color(0xFF16A34A),
-                        label: isAr ? 'فارغ' : 'Empty',
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          _ColorLegendPill(
+                            color: const Color(0xFF16A34A),
+                            label: isAr ? 'فارغ' : 'Empty',
+                          ),
+                          _ColorLegendPill(
+                            color: const Color(0xFFEAB308),
+                            label: isAr ? 'سيارتك' : 'Your Car',
+                          ),
+                          _ColorLegendPill(
+                            color: const Color(0xFF8B5CF6),
+                            label: isAr ? 'حرّكته لسيارة أخرى' : 'Other Car (By You)',
+                          ),
+                          _ColorLegendPill(
+                            color: const Color(0xFFDC2626),
+                            label: isAr ? 'سيارات الزملاء' : 'Colleagues',
+                          ),
+                        ],
                       ),
-                      _ColorLegendPill(
-                        color: const Color(0xFFEAB308),
-                        label: isAr ? 'سيارتك' : 'Your Car',
-                      ),
-                      _ColorLegendPill(
-                        color: const Color(0xFF8B5CF6),
-                        label: isAr ? 'حرّكته لسيارة أخرى' : 'Other Car (By You)',
-                      ),
-                      _ColorLegendPill(
-                        color: const Color(0xFFDC2626),
-                        label: isAr ? 'سيارات الزملاء' : 'Colleagues',
+                      const SizedBox(height: 8),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFD97706),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        onPressed: () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          await ref
+                              .read(appControllerProvider.notifier)
+                              .api
+                              .returnLiftToGroundFloor();
+                          if (mounted) {
+                            messenger.showSnackBar(
+                              SnackBar(
+                                backgroundColor: const Color(0xFFD97706),
+                                content: Text(
+                                  isAr
+                                      ? '⬇ تم إرسال أمر إرجاع المصعد إلى الطابق الأرضي (الوضع الافتراضي P1)'
+                                      : '⬇ Return Lift to Ground Floor (P1) command sent',
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.arrow_downward_rounded, size: 18),
+                        label: Text(
+                          isAr
+                              ? 'إرجاع المصعد للطابق الأرضي (الوضع الافتراضي P1)'
+                              : 'Return Lift to Ground Floor (Default P1)',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12.5,
+                          ),
+                        ),
                       ),
                     ],
                   );
@@ -396,6 +438,21 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
                       plateNumber: space.vehiclePlate,
                       targetSpaceNumber: space.spaceNumber,
                     );
+              // Parse Lane (1..4) & Level (1..3) from spaceNumber (e.g. L42 -> lane=4, level=2)
+              final sn = space.spaceNumber.trim().toUpperCase();
+              int parsedLane = 0;
+              int parsedLevel = space.level;
+              if (sn.length >= 3 && sn.startsWith('L')) {
+                parsedLane = int.tryParse(sn.substring(1, 2)) ?? 0;
+                parsedLevel = int.tryParse(sn.substring(2, 3)) ?? space.level;
+              }
+              if (parsedLane >= 1 && parsedLane <= 4) {
+                await api.dispatchAutoPlcStep1(
+                  isPark: isPark,
+                  lane: parsedLane,
+                  level: parsedLevel,
+                );
+              }
               ref.read(appControllerProvider.notifier).upsertRequest(req);
               await ref.read(appControllerProvider.notifier).refreshAllData();
               if (ctx.mounted) Navigator.of(ctx).pop();
