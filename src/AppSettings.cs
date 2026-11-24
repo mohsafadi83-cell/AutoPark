@@ -112,7 +112,7 @@ namespace AutoPark
             "ls_L4_top", "ls_L4_mid", "ls_L4_btm",
             "mg_prot_L1", "mg_prot_L2", "mg_prot_L3", "mg_prot_L4",
             "check_loc_L1", "check_loc_L2", "check_loc_L3", "check_loc_L4",
-            "manual_mode_tag", "manual_ok_tag",
+            "manual_mode_tag", "manual_ok_tag", "sim_manual_tag", "manual_action_tag", "reset_m_tag",
             "man_pump_tag", "man_wall_tag", "man_cutoff_tag", "man_up_tag", "man_down_tag",
             "man_s1_tag", "man_s2_tag", "man_s3_tag", "man_s4_tag",
             "man_l1_tag", "man_l2_tag", "man_l3_tag", "man_l4_tag",
@@ -123,30 +123,48 @@ namespace AutoPark
         {
             switch (key)
             {
-                case "system_ready_tag": return "ParkDB.LANE_OK";
+                case "system_ready_tag": return "DB1,X0.4";
                 case "emergency_status_tag": return "M50.0";
                 case "emergency_during_move_tag": return "M7.0";
-                case "safety_ok_tag": return "PCELL_IN_1";
+                case "safety_ok_tag": return "DB1,X0.7";
+                case "pcell_inside_db_tag": return "DB1,X0.7";
+                case "pcell_outside_db_tag": return "DB1,X1.0";
+                case "fault_db_tag": return "DB1,X0.0";
+                case "emg_db_tag": return "DB1,X0.1";
+                case "pfail_db_tag": return "DB1,X0.2";
+                case "auto_ok_tag": return "DB1,X0.4";
+                case "wall_sim_up_tag": return "DB1,X3.0";
                 case "obstacle_exist_tag": return "M3.3";
                 case "obstacle_reset_tag": return "M5.7";
+                case "pump_overload_tag": return "M50.1";
+                case "compressor_overload_tag": return "M50.2";
+                case "error_in_position_tag": return "M50.3";
                 case "stopper_fault_tag": return "M50.4";
                 case "lift_invalid_pos_tag": return "M50.5";
+                case "siren_silencer_tag": return "M9.7";
                 case "heartbeat_tag": return "M60.3";
                 case "machine_state_tag": return "DB1,X0.3";
-                case "parking_space_status_tag": return "ParkDB.LANE_FULL";
-                case "vehicle_position_tag": return "ParkDB.Level_Number";
+                case "parking_space_status_tag": return "IB0";
+                case "vehicle_position_tag": return "DB2,B4";
                 case "alarm_tag": return "DB2,W8";
                 case "alarm_section_tag": return "MW50";
                 case "reset_command_tag": return "DB2,X10.0";
+                case "reset_m_tag": return "M0.5";
                 case "maintenance_due_tag": return "DB2,X10.1";
                 case "maintenance_reset_tag": return "DB2,X10.2";
+                case "wall_valve_db_tag": return "DB2,X10.3";
+                case "step1_done_tag": return "DB2,X5.5";
+                case "step2_done_tag": return "DB2,X5.7";
+                case "auto_no_progress_tag": return "DB2,X6.2";
                 case "auto_mode_tag": return "DB1,X0.3";
-                case "lane_number_tag": return "ParkDB.Lane_Number";
-                case "level_number_tag": return "ParkDB.Level_Number";
+                case "sim_manual_tag": return "DB1,X2.7";
+                case "manual_action_tag": return "M0.3";
+                case "lane_number_tag": return "DB2,B3";
+                case "level_number_tag": return "DB2,B4";
                 case "park_command_tag": return "DB2,X6.3";
                 case "retrieve_command_tag": return "DB2,X6.4";
-                case "command_id_tag": return "ParkDB.Lane_Number";
-                case "target_space_tag": return "ParkDB.Level_Number";
+                case "command_id_tag": return "DB2,B3";
+                case "target_space_tag": return "DB2,B4";
                 case "command_acknowledgement_tag": return "DB2,X6.0";
                 case "command_complete_tag": return "DB2,X6.1";
                 case "command_error_tag": return "MW50";
@@ -195,19 +213,19 @@ namespace AutoPark
             return "ParkDB." + key.ToUpperInvariant();
         }
 
-        /// <summary>تحويل رقم الطابق بالواجهة (P3 علوي=3، P2 أوسط=2، P1 سفلي=1) إلى قيمة Level_Number بالـ PLC (1=علوي، 2=أوسط، 3=سفلي)</summary>
+        /// <summary>Direct mapping verified from TIA Portal V17 HMI Spot Selection (pp. 42-61 & 159-168): P1->Level 1, P2->Level 2, P3->Level 3.</summary>
         public static int MapUiFloorToPlcLevel(int uiFloor)
         {
-            if (uiFloor == 3) return 1;
-            if (uiFloor == 2) return 2;
-            return 3;
+            if (uiFloor <= 1) return 1;
+            if (uiFloor >= 3) return 3;
+            return 2;
         }
 
         public static int MapPlcLevelToUiFloor(int plcLevel)
         {
-            if (plcLevel == 1) return 3;
-            if (plcLevel == 2) return 2;
-            return 1;
+            if (plcLevel <= 1) return 1;
+            if (plcLevel >= 3) return 3;
+            return 2;
         }
 
         public static AppSettings Load(string path)
@@ -921,14 +939,14 @@ namespace AutoPark
             catch { }
         }
 
-        public void PushOperationToBackend(string opType, string plateNumber)
+        public bool PushOperationToBackend(string opType, string plateNumber)
         {
-            PushOperationToBackend(opType, plateNumber, false, null);
+            return PushOperationToBackend(opType, plateNumber, false, null);
         }
 
-        public void PushOperationToBackend(string opType, string plateNumber, bool isOtherVehicle, string targetSpaceNumber)
+        public bool PushOperationToBackend(string opType, string plateNumber, bool isOtherVehicle, string targetSpaceNumber)
         {
-            if (string.IsNullOrEmpty(BackendToken)) return;
+            if (string.IsNullOrEmpty(BackendToken)) return false;
             try
             {
                 string endpoint = opType == "PARK" ? "/parking/request" : "/parking/retrieve";
@@ -936,9 +954,13 @@ namespace AutoPark
                 if (!string.IsNullOrEmpty(targetSpaceNumber))
                     body += ",\"targetSpaceNumber\":\"" + EscapeJson(targetSpaceNumber) + "\"";
                 body += "}";
-                HttpSend("POST", ApiBaseUrl + endpoint, body);
+                string resp = HttpSend("POST", ApiBaseUrl + endpoint, body);
+                return !string.IsNullOrEmpty(resp) && resp.IndexOf("\"id\"", StringComparison.OrdinalIgnoreCase) >= 0;
             }
-            catch { }
+            catch
+            {
+                return false;
+            }
         }
 
         public bool PullDevicesFromBackend()

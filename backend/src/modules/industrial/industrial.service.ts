@@ -25,7 +25,7 @@ import {
   IndustrialController, OFFLINE_STATUS,
 } from './industrial-controller.interface';
 import {
-  DEFAULT_PLC_ALARM_DEFINITIONS, DEFAULT_TAG_DESCRIPTIONS, IntegrationSettings, SECRET_FIELDS, TAG_KEYS, TagDefinition, TagMap,
+  DEFAULT_PLC_ALARM_DEFINITIONS, DEFAULT_TAG_DESCRIPTIONS, DEFAULT_VERIFIED_S7_TAG_MAP, IntegrationSettings, SECRET_FIELDS, TAG_KEYS, TagDefinition, TagMap,
 } from './integration-settings';
 import { VncBridgeService } from './vnc-web.controller';
 
@@ -221,32 +221,40 @@ export class IndustrialIntegrationService implements OnModuleInit, OnModuleDestr
         }
       };
 
+      const protocolRaw = (row?.protocol ?? this.cfg.industrial.protocol ?? 'MOCK').toUpperCase();
+      const protocol = (Object.values(Protocol).includes(protocolRaw as Protocol) ? protocolRaw : Protocol.MOCK) as Protocol;
+
       const tagMap: TagMap = {};
       const rawTags = (row?.tagMap ?? {}) as Record<string, TagDefinition>;
+      const s7Defaults = protocol === Protocol.SIEMENS_S7 ? DEFAULT_VERIFIED_S7_TAG_MAP : {};
+
+      // Seed verified S7-1200 absolute tag map defaults when protocol is SIEMENS_S7
+      for (const [k, def] of Object.entries(s7Defaults)) {
+        tagMap[k] = { ...def };
+      }
+
       for (const k of TAG_KEYS) {
         const d = DEFAULT_TAG_DESCRIPTIONS[k];
         const r = rawTags[k];
+        const defS7 = s7Defaults[k];
         tagMap[k] = {
-          address: r?.address ?? '',
-          dataType: r?.dataType ?? d.dataType,
-          access: r?.access ?? d.access,
-          description: r?.description ?? d.description,
+          address: (r?.address && r.address.trim()) ? r.address.trim() : (defS7?.address ?? ''),
+          dataType: r?.dataType ?? defS7?.dataType ?? d.dataType,
+          access: r?.access ?? defS7?.access ?? d.access,
+          description: r?.description ?? defS7?.description ?? d.description,
         };
       }
       // Preserve all extended TIA Portal tags (limit switches, spots, manual controls, 2-step handshake)
       for (const [k, r] of Object.entries(rawTags)) {
-        if (!(k in tagMap) && r && typeof r === 'object') {
+        if (r && typeof r === 'object' && r.address && r.address.trim()) {
           tagMap[k] = {
-            address: r.address ?? '',
-            dataType: r.dataType ?? 'BOOL',
-            access: r.access ?? 'RW',
-            description: r.description ?? k,
+            address: r.address.trim(),
+            dataType: r.dataType ?? s7Defaults[k]?.dataType ?? 'BOOL',
+            access: r.access ?? s7Defaults[k]?.access ?? 'RW',
+            description: r.description ?? s7Defaults[k]?.description ?? k,
           };
         }
       }
-
-      const protocolRaw = (row?.protocol ?? this.cfg.industrial.protocol ?? 'MOCK').toUpperCase();
-      const protocol = (Object.values(Protocol).includes(protocolRaw as Protocol) ? protocolRaw : Protocol.MOCK) as Protocol;
 
       return {
         settings: {
