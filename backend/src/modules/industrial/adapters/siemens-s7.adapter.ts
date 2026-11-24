@@ -781,13 +781,18 @@ export class SiemensS7Adapter implements IndustrialController {
     }
 
     if (action === 'RETURN_PARK') {
-      this.softEmergencyStop = false;
-      this.softEmergencyDuringMove = false;
+      const snap = this.getSensorsSnapshot();
+      if (snap.emergencyStop || snap.obstacleExist) {
+        throw new ControllerError(
+          'Cannot return lift to home while Emergency Stop or Obstacle is active',
+          'REJECTED',
+        );
+      }
       await this.tryWriteLogicalTag('auto_mode_tag', true);
       await this.tryWriteLogicalTag('step2_start_tag', true);
       await this.tryWriteLogicalTag('step2_ready_tag', false);
       this.decodePlcAlarms(this.lastValues);
-      return { ok: true, action, message: 'تم إرسال أمر إرجاع المصعد للطابق الأرضي (Return Park — M10.1=1, DB2,X5.6=0).' };
+      return { ok: true, action, message: 'تم إرسال أمر إرجاع المصعد إلى الوضع الطبيعي (Return Lift to Home).' };
     }
 
     // SAFE_RESET: pulse ParkDB.Reset + clear Reset merker %M0.5 (matches HMI Button_25 Press; never force-writes Alarm Word!)

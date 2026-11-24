@@ -369,7 +369,8 @@ describe('SiemensS7Adapter — Safe Dry-Run Simulation (ZERO Physical Movement)'
     expect(writes.some((w) => w.startsWith('DB2,W8='))).toBe(false);
   });
 
-  test('RETURN_PARK executes exact TIA Portal Page 104 Step 2 sequence (Auto_DB=true, M10.1=true, DB2,X5.6=false)', async () => {
+  test('RETURN_PARK executes exact TIA Portal Page 104 Step 2 sequence (Auto_DB=true, M10.1=true, DB2,X5.6=false) and blocks on E-Stop/Obstacle', async () => {
+    adapter.setDryRunSensorValues({ emergency_status_tag: false, obstacle_exist_tag: false });
     adapter.clearDryRunWrites();
     await adapter.emergencyRecovery('RETURN_PARK');
     expect(adapter.getDryRunWrites().map((w) => `${w.address}=${w.value}`)).toEqual([
@@ -377,6 +378,13 @@ describe('SiemensS7Adapter — Safe Dry-Run Simulation (ZERO Physical Movement)'
       'M10.1=true',
       'DB2,X5.6=false',
     ]);
+
+    adapter.setDryRunSensorValues({ emergency_status_tag: true });
+    await expect(adapter.emergencyRecovery('RETURN_PARK')).rejects.toThrow(/Emergency Stop/i);
+
+    adapter.setDryRunSensorValues({ emergency_status_tag: false, obstacle_exist_tag: true });
+    await expect(adapter.emergencyRecovery('RETURN_PARK')).rejects.toThrow(/Obstacle/i);
+    adapter.setDryRunSensorValues({ emergency_status_tag: false, obstacle_exist_tag: false });
   });
 
   test('writePlcTag coerces integer 1/0 to native boolean true/false on S7 bit addresses', async () => {

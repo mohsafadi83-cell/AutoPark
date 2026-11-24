@@ -341,64 +341,15 @@ class ApiClient {
         return ParkingRequest.fromJson(r.data!);
       });
 
-  /// Writes a single S7-1200 tag (native bool or int). Best-effort when called by non-admin users.
-  Future<void> writePlcTagSafe(String address, dynamic value, {int? pulseMs}) async {
-    try {
-      await _dio.post<Map<String, dynamic>>(
-        '/industrial/s7/write',
-        data: {
-          'address': address,
-          'value': value,
-          if (pulseMs != null && pulseMs > 0) 'pulseMs': pulseMs,
-        },
-      );
-    } catch (_) {
-      // Ignore permission/network fallback errors if backend already handled the command
-    }
-  }
-
-  /// Sends the verified TIA Portal 2-step Automatic Step 1 sequence directly for a specific bay (L{lane}{level}).
-  Future<void> dispatchAutoPlcStep1({
-    required bool isPark,
-    required int lane,
-    required int level,
-  }) async {
-    if (lane < 1 || lane > 4 || level < 1 || level > 3) return;
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    for (final addr in const [
-      'DB1,X1.1', 'DB1,X1.2', 'DB1,X1.3', 'DB1,X1.4', 'DB1,X1.5',
-      'DB1,X2.6', 'DB1,X0.5', 'DB1,X2.7', 'M0.3', 'M0.4',
-    ]) {
-      await writePlcTagSafe(addr, false);
-    }
-    await writePlcTagSafe('DB1,X0.3', true); // Auto_DB = 1
-    await writePlcTagSafe('DB2,B3', lane);   // ParkDB.Lane_Number (Byte @ 3.0)
-    await writePlcTagSafe('DB2,B4', level);  // ParkDB.Level_Number (Byte @ 4.0)
-    if (isPark) {
-      await writePlcTagSafe('M3.${3 + lane}', true); // Lane1..4_check_location
-      await writePlcTagSafe('DB2,X6.4', false);      // Park_OUT = 0
-      await writePlcTagSafe('DB2,X6.3', true);       // Park_IN = 1
-    } else {
-      await writePlcTagSafe('DB2,X6.3', false);      // Park_IN = 0
-      await writePlcTagSafe('DB2,X6.4', true);       // Park_OUT = 1
-    }
-    await Future<void>.delayed(const Duration(milliseconds: 250));
-    await writePlcTagSafe('M10.0', true);     // SetBit(Park_IN_Step1_Start)
-    await writePlcTagSafe('DB2,X5.4', false); // ResetBit(Park_Step1_Ready)
-  }
-
-  /// Returns the lift to Ground Floor (Default P1 — TIA Portal Page 104 Step 2: M10.1=1, DB2,X5.6=0).
-  Future<void> returnLiftToGroundFloor() async {
-    await writePlcTagSafe('DB1,X0.3', true);  // Auto_DB = 1
-    await writePlcTagSafe('M10.1', true);     // SetBit(Park_IN_Step2_Start)
-    await writePlcTagSafe('DB2,X5.6', false); // ResetBit(Park_Step2_Ready)
-    try {
-      await _dio.post<Map<String, dynamic>>(
-        '/industrial/s7/recovery',
-        data: {'action': 'RETURN_PARK'},
-      );
-    } catch (_) {}
-  }
+  /// Returns the lift to its engineered Home / Standby position through the NestJS Backend FIFO queue.
+  /// Enforces server-side RBAC, Emergency Stop, and Obstacle safety interlocks.
+  Future<Map<String, dynamic>> returnLiftToHome() => _guard(() async {
+        final r = await _dio.post<Map<String, dynamic>>(
+          '/industrial/s7/recovery',
+          data: const {'action': 'RETURN_PARK'},
+        );
+        return r.data ?? const {'ok': true};
+      });
 
   Future<Paginated<ParkingRequest>> getRequests({
     String? status,
