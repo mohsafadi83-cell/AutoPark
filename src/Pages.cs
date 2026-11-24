@@ -996,13 +996,23 @@ namespace AutoPark
                 bool dispatched = ps.PushOperationToBackend(opCopy, plateCopy, isOtherCopy, targetSpaceCopy);
                 _backendDispatched = dispatched;
 
-                // Also write the exact verified TIA Portal 2-step Automatic sequence directly to S7-1200 (DB1 / DB2 / %M)
-                // so Automatic Park/Retrieve moves the PLC immediately even before UPDATE_COMPANY_SERVER.bat is run.
+                // Wait 600ms so any older backend 350ms pulse finishes BEFORE we latch the clean TIA Portal 2-step sequence
+                System.Threading.Thread.Sleep(600);
+
+                // Clear any leftover manual bits & ensure pure Auto Mode
+                ps.SendPlcWriteBool("DB1,X1.1", false, 0);   // Man_Pump = 0
+                ps.SendPlcWriteBool("DB1,X1.2", false, 0);   // Man_Wall = 0
+                ps.SendPlcWriteBool("DB1,X1.3", false, 0);   // Man_Up = 0
+                ps.SendPlcWriteBool("DB1,X1.4", false, 0);   // Man_Down = 0
+                ps.SendPlcWriteBool("DB1,X1.5", false, 0);   // Man_Cutoff = 0
                 ps.SendPlcWriteBool("DB1,X2.6", false, 0);   // User_Logoff = 0
                 ps.SendPlcWriteBool("DB1,X0.5", false, 0);   // Manual_DB = 0
                 ps.SendPlcWriteBool("DB1,X2.7", false, 0);   // Sim Manual = 0
                 ps.SendPlcWriteBool("M0.3", false, 0);       // manual_action = 0
+                ps.SendPlcWriteBool("M0.4", false, 0);       // Accept_action_manual = 0
                 ps.SendPlcWriteBool("DB1,X0.3", true, 0);    // Auto_DB = 1
+
+                // Step A: Write Lane_Number (DB2,B3) & Level_Number (DB2,B4) + Mode bit (Park_IN / Park_OUT)
                 ps.SendPlcWrite("DB2,B3", laneCopy, 0);      // ParkDB.Lane_Number (Byte @ 3.0)
                 ps.SendPlcWrite("DB2,B4", levelCopy, 0);     // ParkDB.Level_Number (Byte @ 4.0)
                 if (opCopy == "PARK")
@@ -1011,16 +1021,17 @@ namespace AutoPark
                         ps.SendPlcWriteBool("M3." + (3 + laneCopy), true, 0); // Lane1..4_check_location
                     ps.SendPlcWriteBool("DB2,X6.4", false, 0); // Park_OUT = 0
                     ps.SendPlcWriteBool("DB2,X6.3", true, 0);  // Park_IN = 1
-                    ps.SendPlcWriteBool("DB2,X5.4", false, 0); // ResetBit(Park_Step1_Ready)
-                    ps.SendPlcWriteBool("M10.0", true, 0);     // SetBit(Park_IN_Step1_Start)
                 }
                 else
                 {
                     ps.SendPlcWriteBool("DB2,X6.3", false, 0); // Park_IN = 0
                     ps.SendPlcWriteBool("DB2,X6.4", true, 0);  // Park_OUT = 1
-                    ps.SendPlcWriteBool("DB2,X5.4", false, 0); // ResetBit(Park_Step1_Ready)
-                    ps.SendPlcWriteBool("M10.0", true, 0);     // SetBit(Park_IN_Step1_Start)
                 }
+
+                // Step B: Wait 250ms for PLC scan to latch Lane/Level/Mode, then execute exact TIA Portal Page 108 Step 1 start
+                System.Threading.Thread.Sleep(250);
+                ps.SendPlcWriteBool("M10.0", true, 0);       // SetBit(Park_IN_Step1_Start)
+                ps.SendPlcWriteBool("DB2,X5.4", false, 0);   // ResetBit(Park_Step1_Ready)
             });
             st.NotifyChanged();
 
