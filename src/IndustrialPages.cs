@@ -609,8 +609,8 @@ namespace AutoPark
 
             var holdCard = new Card { Dock = DockStyle.Fill, Padding = new Padding(16), Margin = new Padding(6) };
             var holdTitle = Theme.Label(
-                Loc.T("Direct Manual Controls (Rows 1–3 Toggle | Row 4 Lanes L1–L4 Momentary | S1–S4 & L1–L4 activate M0.4):",
-                      "التحكم اليدوي المباشر (الصفوف 1–3 تبديل Toggle | الصف السفلي L1–L4 لحظي Momentary | S1–S4 و L1–L4 تفعّل M0.4):"),
+                Loc.T("Direct Manual Controls (Rows 1–3 Toggle | Row 4 Lanes L1–L4 Momentary + Accept_action_manual M0.4):",
+                      "التحكم اليدوي المباشر (الصفوف 1–3 تبديل Toggle | الصف السفلي L1–L4 لحظي Momentary + M0.4):"),
                 Theme.Bold(9.8f), Theme.Primary);
             holdTitle.Dock = DockStyle.Top;
             holdTitle.Height = 28;
@@ -775,19 +775,19 @@ namespace AutoPark
         {
             if (_activeMomentaryKey != controlKey && controlKey != null) return;
             _activeMomentaryKey = null;
-            bool keepAcceptHigh = HasAnyActiveStopper();
-            _lblStatus.Text = Loc.T("🟢 Momentary released (ResetBit = 0): ", "🟢 تم إفلات الزر اللحظي (ResetBit = 0): ") + label + " (Accept_action_manual M0.4 = " + (keepAcceptHigh ? "1" : "0") + ")";
+            bool keepManualActionHigh = HasAnyActiveStopper();
+            _lblStatus.Text = Loc.T("🟢 Momentary released (ResetBit = 0): ", "🟢 تم إفلات الزر اللحظي (ResetBit = 0): ") + label + " (Accept_action_manual M0.4 = 0)";
             _lblStatus.ForeColor = Theme.Ok;
 
             string keyCopy = controlKey;
             string lblCopy = label;
-            bool keepHigh = keepAcceptHigh;
+            bool keepM03 = keepManualActionHigh;
             ParkState.Instance.RecordLocalAudit("MANUAL_MOMENTARY", keyCopy, lblCopy, Loc.UserDisplay(_shell.CurrentUser));
             ThreadPool.QueueUserWorkItem(delegate
             {
                 ParkState.Instance.SendManualControl(keyCopy, false);
-                ParkState.Instance.SendPlcWriteBool("M0.4", keepHigh, 0);
-                ParkState.Instance.SendPlcWriteBool("M0.3", keepHigh, 0);
+                ParkState.Instance.SendPlcWriteBool("M0.4", false, 0);
+                ParkState.Instance.SendPlcWriteBool("M0.3", keepM03, 0);
             });
         }
 
@@ -905,35 +905,29 @@ namespace AutoPark
 
             UpdateToggleVisual(controlKey, active);
             bool isStopper = IsStopperKey(controlKey);
-            bool acceptManualState = isStopper && HasAnyActiveStopper();
 
             if (active)
             {
-                string extra = isStopper ? " + Accept_action_manual (M0.4 = 1)" : "";
-                _lblStatus.Text = Loc.T("🟢 Toggled ON (SetBit = 1): ", "🟢 تم التشغيل (Toggle ON = 1): ") + label + " (" + controlKey + ")" + extra;
+                _lblStatus.Text = Loc.T("🟢 Toggled ON (SetBit = 1): ", "🟢 تم التشغيل (Toggle ON = 1): ") + label + " (" + controlKey + ")";
                 _lblStatus.ForeColor = Theme.Ok;
             }
             else
             {
-                string extra = isStopper ? (" + Accept_action_manual (M0.4 = " + (acceptManualState ? "1" : "0") + ")") : "";
-                _lblStatus.Text = Loc.T("⚪ Toggled OFF (ResetBit = 0): ", "⚪ تم الإيقاف (Toggle OFF = 0): ") + label + " (" + controlKey + ")" + extra;
+                _lblStatus.Text = Loc.T("⚪ Toggled OFF (ResetBit = 0): ", "⚪ تم الإيقاف (Toggle OFF = 0): ") + label + " (" + controlKey + ")";
                 _lblStatus.ForeColor = Theme.Ink;
             }
 
             string keyCopy = controlKey;
             string lblCopy = label;
             bool stateCopy = active;
-            bool sendAcceptManual = isStopper;
-            bool acceptStateCopy = acceptManualState || (_activeMomentaryKey != null);
+            bool sendManualAction = isStopper;
+            bool manualActionStateCopy = HasAnyActiveStopper() || (_activeMomentaryKey != null);
             ParkState.Instance.RecordLocalAudit(stateCopy ? "MANUAL_TOGGLE_ON" : "MANUAL_TOGGLE_OFF", keyCopy, lblCopy, Loc.UserDisplay(_shell.CurrentUser));
             ThreadPool.QueueUserWorkItem(delegate
             {
                 ParkState.Instance.SendManualControl(keyCopy, stateCopy);
-                if (sendAcceptManual)
-                {
-                    ParkState.Instance.SendPlcWriteBool("M0.3", acceptStateCopy, 0);
-                    ParkState.Instance.SendPlcWriteBool("M0.4", acceptStateCopy, 0);
-                }
+                if (sendManualAction)
+                    ParkState.Instance.SendPlcWriteBool("M0.3", manualActionStateCopy, 0);
             });
         }
 

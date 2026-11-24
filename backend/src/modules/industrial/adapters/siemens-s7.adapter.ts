@@ -894,9 +894,9 @@ export class SiemensS7Adapter implements IndustrialController {
     const pulseMs = controlKey === 'maintenance_reset_tag' ? 400 : undefined;
     await this.tryWriteLogicalTag(controlKey, active, pulseMs);
 
-    // Stoppers S1-S4 (Toggle) and Lanes L1-L4 (Momentary) all activate BOTH:
-    //   - manual_action (%M0.3)
-    //   - Accept action manual (%M0.4 / accept_manual_tag)
+    // Stoppers S1-S4 (Toggle) & Lanes L1-L4 (Momentary) activate manual_action (%M0.3).
+    // Only Lanes L1-L4 (Momentary) activate Accept_action_manual (%M0.4 / accept_manual_tag).
+    const laneKeys = new Set(['man_l1_tag', 'man_l2_tag', 'man_l3_tag', 'man_l4_tag']);
     const needsManualAction = new Set([
       'man_s1_tag', 'man_s2_tag', 'man_s3_tag', 'man_s4_tag',
       'man_l1_tag', 'man_l2_tag', 'man_l3_tag', 'man_l4_tag',
@@ -907,9 +907,10 @@ export class SiemensS7Adapter implements IndustrialController {
       } else {
         this.activeManualActionKeys.delete(controlKey);
       }
-      const anyActive = this.activeManualActionKeys.size > 0;
-      await this.tryWriteLogicalTag('manual_action_tag', anyActive);
-      await this.tryWriteLogicalTag('accept_manual_tag', anyActive);
+      await this.tryWriteLogicalTag('manual_action_tag', this.activeManualActionKeys.size > 0);
+    }
+    if (laneKeys.has(controlKey)) {
+      await this.tryWriteLogicalTag('accept_manual_tag', active);
     }
     return {
       ok: true,
