@@ -546,23 +546,34 @@ namespace AutoPark
     {
         public bool LiveConnected = false;
         public string Mode = "SIMULATED_FALLBACK";
-        public bool PhotocellClear = true;      // PCELL_IN_1: true=clear, false=obstacle at entrance
-        public bool ObstacleExist = false;      // Obstacle_exist
-        public bool EmergencyPhysical = false;  // EMRGENCY
-        public bool EmergencyDuringMove = false;// emergency during up or down
-        public bool StopperFault = false;       // stopper_not_energize / Alarm Section bit 12
-        public bool LiftInvalidPos = false;     // Lift_not_in_vaild_position / Alarm Section bit 13
-        public bool ErrorInPosition = false;    // Alarm Section bit 11
-        public bool MaintenanceDue = false;     // ParkDB.Period_Maintanence
-        public bool AutoMode = true;            // ParkIO_Data.Auto_DB
-        public bool ManualMode = false;         // ParkIO_Data.Manual_DB
+        public bool PhotocellClear = true;      // ParkIO_Data.PCELL_inside_DB (DB1,X0.7)
+        public bool PcellOutsideClear = true;   // ParkIO_Data.PCELL_outside_DB (DB1,X1.0)
+        public bool FaultDb = false;            // ParkIO_Data.FAULT_DB (DB1,X0.0)
+        public bool PhaseFail = false;          // ParkIO_Data.PFAIL_DB (DB1,X0.2)
+        public bool PumpOverload = false;       // Hydrulic Pump O.L (%M50.1)
+        public bool CompressorOverload = false; // Compressor O.L (%M50.2)
+        public bool ObstacleExist = false;      // Obstacle_exist (%M3.3)
+        public bool EmergencyPhysical = false;  // Emergency Stop (%M50.0 / DB1,X0.1)
+        public bool EmergencyDuringMove = false;// emergency during up or down (%M7.0)
+        public bool StopperFault = false;       // stopper_not_energize (%M50.4 / Alarm Section bit 12)
+        public bool LiftInvalidPos = false;     // Lift_not_in_vaild_position (%M50.5 / Alarm Section bit 13)
+        public bool ErrorInPosition = false;    // Error_in_Position (%M50.3 / Alarm Section bit 11)
+        public bool MaintenanceDue = false;     // ParkDB.Period_Maintanence (DB2,X10.1)
+        public bool AutoMode = true;            // ParkIO_Data.Auto_DB (DB1,X0.3)
+        public bool ManualMode = false;         // ParkIO_Data.Manual_DB (DB1,X0.5)
         public int AlarmWord = 0;
         public int AlarmSection = 0;
+        // Raw PLC process image bytes (IB0..IB3 -> I0.0..I3.7, QB0..QB3 -> Q0.0..Q3.7)
+        public int[] RawInputs = new int[4];
+        public int[] RawOutputs = new int[4];
+        public bool HasRawIo = false;
         // [laneIndex 0..3, levelIndex 0=BTM(P1), 1=MID(P2), 2=TOP(P3)]
         public bool[,] LimitSwitches = new bool[4, 3];
+        public bool[] LsMapped = new bool[4];
         public bool[] MgProt = new bool[] { true, true, true, true };
-        public bool[] CheckLocation = new bool[] { true, true, true, true };
-        public int[] CurrentFloor = new int[] { 1, 1, 1, 1 }; // 1=P1(BTM), 2=P2(MID), 3=P3(TOP), 0=Between
+        public bool[] MgProtMapped = new bool[4];
+        public bool[] CheckLocation = new bool[] { false, false, false, false };
+        public int[] CurrentFloor = new int[] { 0, 0, 0, 0 }; // 1=P1(BTM), 2=P2(MID), 3=P3(TOP), 0=Unmapped/Between
         public string LastSyncTime = "—";
 
         public PlcSensorsSnapshot()
@@ -1166,9 +1177,11 @@ namespace AutoPark
                     int idx = lane - 1;
                     bool lsTop = ParseJsonBool(chunk, "lsTop", false);
                     bool lsMid = ParseJsonBool(chunk, "lsMid", false);
-                    bool lsBtm = ParseJsonBool(chunk, "lsBtm", true);
-                    bool mgProt = ParseJsonBool(chunk, "mgProt", true);
-                    bool checkLoc = ParseJsonBool(chunk, "checkLocation", true);
+                    bool lsBtm = ParseJsonBool(chunk, "lsBtm", false);
+                    bool lsMapped = ParseJsonBool(chunk, "lsMapped", false);
+                    bool mgProt = ParseJsonBool(chunk, "mgProt", false);
+                    bool mgProtMapped = ParseJsonBool(chunk, "mgProtMapped", false);
+                    bool checkLoc = ParseJsonBool(chunk, "checkLocation", false);
                     int curFloor = ParseJsonInt(chunk, "currentFloor", lsTop ? 3 : (lsMid ? 2 : (lsBtm ? 1 : 0)));
 
                     if (Sensors.LiveConnected)
@@ -1176,11 +1189,61 @@ namespace AutoPark
                         Sensors.LimitSwitches[idx, 0] = lsBtm;
                         Sensors.LimitSwitches[idx, 1] = lsMid;
                         Sensors.LimitSwitches[idx, 2] = lsTop;
+                        Sensors.LsMapped[idx] = lsMapped;
                         Sensors.CurrentFloor[idx] = curFloor;
                     }
                     Sensors.MgProt[idx] = mgProt;
+                    Sensors.MgProtMapped[idx] = mgProtMapped;
                     Sensors.CheckLocation[idx] = checkLoc;
                 }
+
+                // Also pull raw /industrial/s7/live so real IB0..IB3, DB1 bits, Pump/Comp O.L, and true mapped state are ALWAYS accurate!
+                try
+                {
+                    string liveJson = HttpSend("GET", ApiBaseUrl + "/industrial/s7/live", null);
+                    if (!string.IsNullOrEmpty(liveJson) && liveJson.IndexOf("\"IB0\"", StringComparison.Ordinal) >= 0)
+                    {
+                        Sensors.RawInputs[0] = ParseJsonInt(liveJson, "IB0", 0);
+                        Sensors.RawInputs[1] = ParseJsonInt(liveJson, "IB1", 0);
+                        Sensors.RawInputs[2] = ParseJsonInt(liveJson, "IB2", 0);
+                        Sensors.RawInputs[3] = ParseJsonInt(liveJson, "IB3", 0);
+                        Sensors.RawOutputs[0] = ParseJsonInt(liveJson, "QB0", 0);
+                        Sensors.RawOutputs[1] = ParseJsonInt(liveJson, "QB1", 0);
+                        Sensors.RawOutputs[2] = ParseJsonInt(liveJson, "QB2", 0);
+                        Sensors.RawOutputs[3] = ParseJsonInt(liveJson, "QB3", 0);
+                        Sensors.HasRawIo = true;
+
+                        // Decode verified ParkIO_Data [DB1] & %M sensor bits directly from live PLC values
+                        if (liveJson.Contains("\"fault_db_tag\"")) Sensors.FaultDb = ParseJsonBool(liveJson, "fault_db_tag", false);
+                        if (liveJson.Contains("\"pfail_db_tag\"")) Sensors.PhaseFail = ParseJsonBool(liveJson, "pfail_db_tag", false);
+                        if (liveJson.Contains("\"pcell_inside_db_tag\"")) Sensors.PhotocellClear = ParseJsonBool(liveJson, "pcell_inside_db_tag", Sensors.PhotocellClear);
+                        if (liveJson.Contains("\"pcell_outside_db_tag\"")) Sensors.PcellOutsideClear = ParseJsonBool(liveJson, "pcell_outside_db_tag", true);
+                        if (liveJson.Contains("\"pump_overload_tag\"")) Sensors.PumpOverload = ParseJsonBool(liveJson, "pump_overload_tag", false);
+                        if (liveJson.Contains("\"compressor_overload_tag\"")) Sensors.CompressorOverload = ParseJsonBool(liveJson, "compressor_overload_tag", false);
+                        if (liveJson.Contains("\"error_in_position_tag\"")) Sensors.ErrorInPosition = Sensors.ErrorInPosition || ParseJsonBool(liveJson, "error_in_position_tag", false);
+
+                        // Accurately detect whether each lane's %I limit switch / MG_PROT tags are actually mapped in live PLC values
+                        for (int lane = 1; lane <= 4; lane++)
+                        {
+                            int idx = lane - 1;
+                            bool hasLsKey = liveJson.Contains("\"ls_L" + lane + "_top\"") || liveJson.Contains("\"ls_L" + lane + "_mid\"") || liveJson.Contains("\"ls_L" + lane + "_btm\"");
+                            bool hasMgKey = liveJson.Contains("\"mg_prot_L" + lane + "\"");
+                            Sensors.LsMapped[idx] = hasLsKey;
+                            Sensors.MgProtMapped[idx] = hasMgKey;
+                            if (hasLsKey)
+                            {
+                                Sensors.LimitSwitches[idx, 0] = ParseJsonBool(liveJson, "ls_L" + lane + "_btm", false);
+                                Sensors.LimitSwitches[idx, 1] = ParseJsonBool(liveJson, "ls_L" + lane + "_mid", false);
+                                Sensors.LimitSwitches[idx, 2] = ParseJsonBool(liveJson, "ls_L" + lane + "_top", false);
+                            }
+                            if (hasMgKey)
+                            {
+                                Sensors.MgProt[idx] = ParseJsonBool(liveJson, "mg_prot_L" + lane, false);
+                            }
+                        }
+                    }
+                }
+                catch { }
 
                 // Sync physical Emergency Stop upward if PLC asserts it
                 if (Sensors.LiveConnected && Sensors.EmergencyPhysical && !EmergencyStop)

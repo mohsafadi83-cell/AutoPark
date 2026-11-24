@@ -15,12 +15,17 @@ namespace AutoPark
         readonly System.Windows.Forms.Timer _refreshTimer;
         readonly Label _lblModeBanner;
         readonly Label _lblPhotocell;
+        readonly Label _lblPhotocellOut;
         readonly Label _lblEmergency;
+        readonly Label _lblFaultPhase;
+        readonly Label _lblOverload;
         readonly Label _lblObstacle;
         readonly Label _lblStopper;
         readonly Label _lblLiftPos;
         readonly Label _lblMaintBanner;
         readonly Panel _maintPanel;
+        readonly Label[] _rawInLeds = new Label[32];
+        readonly Label _lblRawIoLine;
         readonly Label[,] _lsCells = new Label[4, 3]; // [lane 0..3, 0=BTM(P1), 1=MID(P2), 2=TOP(P3)]
         readonly Label[] _mgCells = new Label[4];
         readonly Label[] _locCells = new Label[4];
@@ -134,39 +139,76 @@ namespace AutoPark
             _maintPanel.Controls.Add(_lblMaintBanner);
             _maintPanel.Controls.Add(Theme.Holder(btnResetMaint, endDock, 220, new Padding(0, 2, 0, 2)));
 
-            // Safety Indicators Strip (5 cards)
+            // Safety & Sensor Indicators Strip (2 rows × 4 cards = 8 live verified PLC sensors)
             var safetyGrid = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 86,
-                ColumnCount = 5,
-                RowCount = 1,
-                Padding = new Padding(0, 4, 0, 8)
+                Height = 148,
+                ColumnCount = 4,
+                RowCount = 2,
+                Padding = new Padding(0, 4, 0, 6)
             };
-            for (int i = 0; i < 5; i++)
-                safetyGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20f));
+            for (int i = 0; i < 4; i++) safetyGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+            safetyGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
+            safetyGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
 
-            _lblPhotocell = MakeSafetyBadge(safetyGrid, 0, Loc.T("Entrance Photocell (PCELL_IN_1)", "حساس المدخل (PCELL_IN_1)"));
-            _lblEmergency = MakeSafetyBadge(safetyGrid, 1, Loc.T("Emergency Switch (ES1+ES2)", "مفتاح الطوارئ (ES1+ES2)"));
-            _lblObstacle = MakeSafetyBadge(safetyGrid, 2, Loc.T("Lift Obstacle (Obstacle_exist)", "عائق داخل المصعد (Obstacle)"));
-            _lblStopper = MakeSafetyBadge(safetyGrid, 3, Loc.T("Mechanical Stopper", "حالة Stopper الميكانيكي"));
-            _lblLiftPos = MakeSafetyBadge(safetyGrid, 4, Loc.T("Lift Position Validity", "تموضع المصعد (Valid Pos)"));
+            _lblPhotocell = MakeSafetyBadge(safetyGrid, 0, 0, Loc.T("Photocell Inside (DB1,X0.7)", "حساس داخلي (DB1,X0.7)"));
+            _lblPhotocellOut = MakeSafetyBadge(safetyGrid, 1, 0, Loc.T("Photocell Outside (DB1,X1.0)", "حساس خارجي (DB1,X1.0)"));
+            _lblEmergency = MakeSafetyBadge(safetyGrid, 2, 0, Loc.T("Emergency Stop (M50.0 / DB1,X0.1)", "مفتاح الطوارئ (M50.0)"));
+            _lblFaultPhase = MakeSafetyBadge(safetyGrid, 3, 0, Loc.T("PLC Fault / Phase (DB1,X0.0/0.2)", "أعطال / فاز (DB1,X0.0/0.2)"));
+            _lblOverload = MakeSafetyBadge(safetyGrid, 0, 1, Loc.T("Pump & Comp O.L (M50.1/M50.2)", "حمل المضخة والضاغط (M50.1/2)"));
+            _lblObstacle = MakeSafetyBadge(safetyGrid, 1, 1, Loc.T("Lift Obstacle (M3.3)", "عائق المصعد (M3.3)"));
+            _lblStopper = MakeSafetyBadge(safetyGrid, 2, 1, Loc.T("Mechanical Stopper (M50.4)", "حالة Stopper (M50.4)"));
+            _lblLiftPos = MakeSafetyBadge(safetyGrid, 3, 1, Loc.T("Lift Position (M50.3 / M50.5)", "تموضع المصعد (M50.3/5)"));
+
+            // Live Physical Digital Inputs Strip (I0.0 – I3.7 = all 32 hardware sensor inputs directly from PLC IB0..IB3)
+            var rawIoCard = new Card { Dock = DockStyle.Top, Height = 104, Padding = new Padding(14, 8, 14, 8), Margin = new Padding(0, 0, 0, 8) };
+            _lblRawIoLine = Theme.Label(
+                Loc.T("Live Physical PLC Digital Inputs (I0.0–I3.7) — IB0=— IB1=— IB2=— IB3=—",
+                      "مداخل الحساسات الفيزيائية الحية من الـ PLC (I0.0–I3.7) — IB0=— IB1=— IB2=— IB3=—"),
+                Theme.Bold(9.2f), Theme.Primary);
+            _lblRawIoLine.Dock = DockStyle.Top;
+            _lblRawIoLine.Height = 20;
+
+            var rawGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 16, RowCount = 2, RightToLeft = RightToLeft.No };
+            for (int c = 0; c < 16; c++) rawGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 16f));
+            rawGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
+            rawGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
+            for (int i = 0; i < 32; i++)
+            {
+                var led = new Label
+                {
+                    Text = "I" + (i / 8) + "." + (i % 8),
+                    Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    Dock = DockStyle.Fill,
+                    Margin = new Padding(1),
+                    BackColor = Theme.Back,
+                    ForeColor = Theme.Muted,
+                    BorderStyle = BorderStyle.FixedSingle
+                };
+                _rawInLeds[i] = led;
+                rawGrid.Controls.Add(led, i % 16, i / 16);
+            }
+            rawIoCard.Controls.Add(rawGrid);
+            rawIoCard.Controls.Add(_lblRawIoLine);
 
             // Main Limit Switch Matrix Card
-            var matrixCard = new Card { Dock = DockStyle.Fill, Padding = new Padding(18, 14, 18, 14) };
+            var matrixCard = new Card { Dock = DockStyle.Fill, Padding = new Padding(18, 12, 18, 12) };
             var matrixTitle = Theme.Label(
                 Loc.T("Floor Limit Switches Matrix (TOP=P3 / MID=P2 / BTM=P1) & Mechanical Protection (MG_PROT):",
                       "مصفوفة حساسات حدود الطوابق (Limit Switches: TOP=P3 / MID=P2 / BTM=P1) والحماية الميكانيكية (MG_PROT):"),
-                Theme.Bold(11f), Theme.Ink);
+                Theme.Bold(10.5f), Theme.Ink);
+            matrixTitle.UseMnemonic = false;
             matrixTitle.Dock = DockStyle.Top;
-            matrixTitle.Height = 32;
+            matrixTitle.Height = 28;
 
             var tbl = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 5,
                 RowCount = 6,
-                Padding = new Padding(4, 8, 4, 8)
+                Padding = new Padding(4, 6, 4, 6)
             };
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220f));
             for (int c = 1; c <= 4; c++)
@@ -182,7 +224,7 @@ namespace AutoPark
             tbl.Controls.Add(MakeRowTitle(Loc.T("Mid Floor P2 (LS_MID)", "الطابق الأوسط P2 (LS_MID)")), 0, 2);
             tbl.Controls.Add(MakeRowTitle(Loc.T("Bottom Floor P1 (LS_BTM)", "الطابق السفلي P1 (LS_BTM)")), 0, 3);
             tbl.Controls.Add(MakeRowTitle(Loc.T("Mechanical Protection (MG_PROT)", "الحماية الميكانيكية (MG_PROT)")), 0, 4);
-            tbl.Controls.Add(MakeRowTitle(Loc.T("Location Check (Check Location)", "فحص الموقع (Check Location)")), 0, 5);
+            tbl.Controls.Add(MakeRowTitle(Loc.T("Location Check Trigger (M3.4–3.7)", "إشارة فحص الموقع (M3.4–3.7)")), 0, 5);
 
             for (int lane = 0; lane < 4; lane++)
             {
@@ -208,6 +250,7 @@ namespace AutoPark
             matrixCard.Controls.Add(_lblAlarmRegs);
 
             Controls.Add(matrixCard);
+            Controls.Add(rawIoCard);
             Controls.Add(safetyGrid);
             Controls.Add(_maintPanel);
             Controls.Add(topBar);
@@ -221,17 +264,19 @@ namespace AutoPark
             PollAndRender(true);
         }
 
-        Label MakeSafetyBadge(TableLayoutPanel parent, int col, string titleText)
+        Label MakeSafetyBadge(TableLayoutPanel parent, int col, int row, string titleText)
         {
-            var card = new Card { Dock = DockStyle.Fill, Margin = new Padding(4), Padding = new Padding(10, 8, 10, 8) };
-            var t = Theme.Label(titleText, Theme.Semi(8.8f), Theme.Muted);
+            var card = new Card { Dock = DockStyle.Fill, Margin = new Padding(3), Padding = new Padding(8, 5, 8, 5) };
+            var t = Theme.Label(titleText, Theme.Semi(8.4f), Theme.Muted);
+            t.UseMnemonic = false;
             t.Dock = DockStyle.Top;
-            t.Height = 22;
-            var v = Theme.Label("—", Theme.Bold(10f), Theme.Ok);
+            t.Height = 18;
+            var v = Theme.Label("—", Theme.Bold(9.5f), Theme.Ok);
+            v.UseMnemonic = false;
             v.Dock = DockStyle.Fill;
             card.Controls.Add(v);
             card.Controls.Add(t);
-            parent.Controls.Add(card, col, 0);
+            parent.Controls.Add(card, col, row);
             return v;
         }
 
@@ -299,12 +344,27 @@ namespace AutoPark
 
             _maintPanel.Visible = s.MaintenanceDue;
 
-            _lblPhotocell.Text = s.PhotocellClear ? Loc.T("🟢 Entrance Clear", "🟢 المدخل فارغ") : Loc.T("🔴 Blocked!", "🔴 يوجد جسم بالمدخل!");
+            _lblPhotocell.Text = s.PhotocellClear ? Loc.T("🟢 Clear (1)", "🟢 فارغ (1)") : Loc.T("🔴 Blocked (0)!", "🔴 مقطوع (0)!");
             _lblPhotocell.ForeColor = s.PhotocellClear ? Theme.Ok : Theme.Err;
+
+            _lblPhotocellOut.Text = s.PcellOutsideClear ? Loc.T("🟢 Clear (1)", "🟢 فارغ (1)") : Loc.T("🔴 Blocked (0)!", "🔴 مقطوع (0)!");
+            _lblPhotocellOut.ForeColor = s.PcellOutsideClear ? Theme.Ok : Theme.Err;
 
             bool eStop = st.EmergencyStop || s.EmergencyPhysical;
             _lblEmergency.Text = eStop ? Loc.T("🔴 ACTIVE", "🔴 طوارئ مفعّل") : Loc.T("🟢 Normal", "🟢 سليم");
             _lblEmergency.ForeColor = eStop ? Theme.Err : Theme.Ok;
+
+            bool faultOrPhase = s.FaultDb || s.PhaseFail;
+            _lblFaultPhase.Text = faultOrPhase
+                ? (s.PhaseFail ? Loc.T("🔴 Phase Fail!", "🔴 انقطاع فاز!") : Loc.T("🔴 PLC Fault!", "🔴 عطل عام!"))
+                : Loc.T("🟢 Healthy", "🟢 سليم");
+            _lblFaultPhase.ForeColor = faultOrPhase ? Theme.Err : Theme.Ok;
+
+            bool ol = s.PumpOverload || s.CompressorOverload;
+            _lblOverload.Text = ol
+                ? (s.PumpOverload ? Loc.T("🔴 Pump O.L!", "🔴 حمل مضخة!") : Loc.T("🔴 Comp O.L!", "🔴 حمل ضاغط!"))
+                : Loc.T("🟢 Normal", "🟢 سليم");
+            _lblOverload.ForeColor = ol ? Theme.Err : Theme.Ok;
 
             _lblObstacle.Text = s.ObstacleExist ? Loc.T("🔴 Obstacle!", "🔴 عائق مرصود!") : Loc.T("🟢 Clear", "🟢 لا يوجد عائق");
             _lblObstacle.ForeColor = s.ObstacleExist ? Theme.Err : Theme.Ok;
@@ -315,28 +375,68 @@ namespace AutoPark
             _lblLiftPos.Text = (s.LiftInvalidPos || s.ErrorInPosition) ? Loc.T("🔴 Invalid Position!", "🔴 موضع غير صالح!") : Loc.T("🟢 Valid Position", "🟢 موضع دقيق");
             _lblLiftPos.ForeColor = (s.LiftInvalidPos || s.ErrorInPosition) ? Theme.Err : Theme.Ok;
 
+            // Live Physical Digital Inputs (I0.0 – I3.7 from IB0..IB3)
+            if (s.HasRawIo)
+            {
+                _lblRawIoLine.Text = string.Format(
+                    Loc.T("Live Physical PLC Digital Inputs (I0.0–I3.7) — IB0={0}  IB1={1}  IB2={2}  IB3={3}   |   QB0={4}  QB1={5}  QB2={6}  QB3={7}",
+                          "مداخل الحساسات الفيزيائية الحية من الـ PLC (I0.0–I3.7) — IB0={0}  IB1={1}  IB2={2}  IB3={3}   |   QB0={4}  QB1={5}  QB2={6}  QB3={7}"),
+                    s.RawInputs[0], s.RawInputs[1], s.RawInputs[2], s.RawInputs[3],
+                    s.RawOutputs[0], s.RawOutputs[1], s.RawOutputs[2], s.RawOutputs[3]);
+                for (int b = 0; b < 4; b++)
+                {
+                    int val = s.RawInputs[b] & 0xFF;
+                    for (int bit = 0; bit < 8; bit++)
+                    {
+                        bool on = ((val >> bit) & 1) != 0;
+                        var led = _rawInLeds[b * 8 + bit];
+                        led.BackColor = on ? Theme.OkSoft : Theme.Back;
+                        led.ForeColor = on ? Theme.Ok : Theme.Muted;
+                    }
+                }
+            }
+
             for (int lane = 0; lane < 4; lane++)
             {
+                bool lsMapped = s.LsMapped[lane];
                 for (int lv = 0; lv < 3; lv++)
                 {
-                    bool on = s.LimitSwitches[lane, lv];
                     string tagSuffix = lv == 2 ? "LS_TOP" : (lv == 1 ? "LS_MID" : "LS_BTM");
                     string tagLabel = "PL" + (lane + 1) + "_" + tagSuffix;
                     var cell = _lsCells[lane, lv];
-                    cell.Text = (on ? "🟢 ON — " : "⚪ OFF — ") + tagLabel;
-                    cell.BackColor = on ? Theme.OkSoft : Theme.Back;
-                    cell.ForeColor = on ? Theme.Ok : Theme.Muted;
+                    if (s.LiveConnected && !lsMapped)
+                    {
+                        cell.Text = Loc.T("⚙ %I Unmapped — ", "⚙ غير مربوط (%I) — ") + tagLabel;
+                        cell.BackColor = Theme.AmberSoft;
+                        cell.ForeColor = Theme.Amber;
+                    }
+                    else
+                    {
+                        bool on = s.LimitSwitches[lane, lv];
+                        cell.Text = (on ? "🟢 ON — " : "⚪ OFF — ") + tagLabel;
+                        cell.BackColor = on ? Theme.OkSoft : Theme.Back;
+                        cell.ForeColor = on ? Theme.Ok : Theme.Muted;
+                    }
                 }
 
-                bool mg = s.MgProt[lane];
-                _mgCells[lane].Text = mg ? Loc.T("🟢 Safe (OK)", "🟢 آمن (OK)") : Loc.T("🔴 Tripped", "🔴 مقفل / خلل");
-                _mgCells[lane].BackColor = mg ? Theme.OkSoft : Theme.ErrSoft;
-                _mgCells[lane].ForeColor = mg ? Theme.Ok : Theme.Err;
+                if (s.LiveConnected && !s.MgProtMapped[lane])
+                {
+                    _mgCells[lane].Text = Loc.T("⚙ %I Unmapped (MG_PROT)", "⚙ غير مربوط (%I)");
+                    _mgCells[lane].BackColor = Theme.AmberSoft;
+                    _mgCells[lane].ForeColor = Theme.Amber;
+                }
+                else
+                {
+                    bool mg = s.MgProt[lane];
+                    _mgCells[lane].Text = mg ? Loc.T("🟢 Safe (OK)", "🟢 آمن (OK)") : Loc.T("🔴 Tripped", "🔴 مقفل / خلل");
+                    _mgCells[lane].BackColor = mg ? Theme.OkSoft : Theme.ErrSoft;
+                    _mgCells[lane].ForeColor = mg ? Theme.Ok : Theme.Err;
+                }
 
                 bool loc = s.CheckLocation[lane];
-                _locCells[lane].Text = loc ? Loc.T("🟢 Valid", "🟢 مطابق") : Loc.T("🟡 Out of Position", "🟡 خارج الموقع");
-                _locCells[lane].BackColor = loc ? Theme.OkSoft : Theme.AmberSoft;
-                _locCells[lane].ForeColor = loc ? Theme.Ok : Theme.Amber;
+                _locCells[lane].Text = loc ? Loc.T("🟢 Triggered (1)", "🟢 مفعّل (1)") : Loc.T("⚪ Idle (0)", "⚪ خامل (0)");
+                _locCells[lane].BackColor = loc ? Theme.OkSoft : Theme.Back;
+                _locCells[lane].ForeColor = loc ? Theme.Ok : Theme.Muted;
             }
 
             _lblAlarmRegs.Text = string.Format(
@@ -643,19 +743,13 @@ namespace AutoPark
         void ReleaseAllOutputs(string reason)
         {
             _activeHoldKey = null;
-            string[] allKeys = new string[]
-            {
-                "man_pump_tag", "man_up_tag", "man_down_tag", "man_wall_tag", "man_cutoff_tag",
-                "man_s1_tag", "man_s2_tag", "man_s3_tag", "man_s4_tag",
-                "man_l1_tag", "man_l2_tag", "man_l3_tag", "man_l4_tag"
-            };
             _lblStatus.Text = "🛑 " + reason;
             _lblStatus.ForeColor = Theme.Err;
             ParkState.Instance.RecordLocalAudit("MANUAL_STOP_ALL", "ALL_OUTPUTS", reason, Loc.UserDisplay(_shell.CurrentUser));
             ThreadPool.QueueUserWorkItem(delegate
             {
-                for (int i = 0; i < allKeys.Length; i++)
-                    ParkState.Instance.SendManualControl(allKeys[i], false);
+                // Atomic single-command release: clears all 13 manual actuator bits + manual_action_tag (%M0.3)
+                ParkState.Instance.SendManualControl("stop_all_manual", false);
             });
         }
 

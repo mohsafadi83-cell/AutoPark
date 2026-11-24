@@ -24,30 +24,37 @@ export interface PlcTagChange {
 
 export interface LaneSensorsSnapshot {
   lane: number;
-  lsTop: boolean;    // P3 (Level 1)
+  lsTop: boolean;    // P3 (Level 3)
   lsMid: boolean;    // P2 (Level 2)
-  lsBtm: boolean;    // P1 (Level 3)
+  lsBtm: boolean;    // P1 (Level 1)
+  lsMapped?: boolean; // true only when real %I limit switch addresses are configured
   mgProt: boolean;   // Mechanical Group Protection
+  mgProtMapped?: boolean; // true only when real %I MG_PROT address is configured
   checkLocation: boolean;
-  currentFloor: number; // 3=Top(P3), 2=Mid(P2), 1=Bottom(P1), 0=Between/Unknown
+  currentFloor: number; // 3=Top(P3), 2=Mid(P2), 1=Bottom(P1), 0=Between/Unmapped
 }
 
 export interface PlcSensorsSnapshot {
   connected: boolean;
   mode: 'LIVE_PLC' | 'SIMULATED_FALLBACK';
   timestamp: string;
-  photocellClear: boolean;       // PCELL_IN_1: true = clear, false = obstacle at entrance
-  obstacleExist: boolean;        // Obstacle_exist
-  emergencyStop: boolean;        // EMRGENCY (ES1 + ES2)
-  emergencyDuringMove: boolean;  // emergency during up or down
-  stopperFault: boolean;         // stopper_not_energize / Alarm Section bit 12
-  liftInvalidPos: boolean;       // Lift_not_in_vaild_position / Alarm Section bit 13
-  errorInPosition: boolean;      // Alarm Section bit 11
-  maintenanceDue: boolean;       // ParkDB.Period_Maintanence
-  autoMode: boolean;             // ParkIO_Data.Auto_DB
-  manualMode: boolean;           // ParkIO_Data.Manual_DB
-  alarmWord: number;             // ParkDB."Alarm Word"
-  alarmSection: number;          // Alarm Section
+  photocellClear: boolean;       // ParkIO_Data.PCELL_inside_DB (DB1,X0.7)
+  pcellOutsideClear?: boolean;   // ParkIO_Data.PCELL_outside_DB (DB1,X1.0)
+  faultDb?: boolean;             // ParkIO_Data.FAULT_DB (DB1,X0.0)
+  phaseFail?: boolean;           // ParkIO_Data.PFAIL_DB (DB1,X0.2)
+  pumpOverload?: boolean;        // Hydrulic Pump O.L (%M50.1)
+  compressorOverload?: boolean;  // Compressor O.L (%M50.2)
+  obstacleExist: boolean;        // Obstacle_exist (%M3.3)
+  emergencyStop: boolean;        // Emergency Stop (%M50.0 / DB1,X0.1 / Alarm Word bit 0)
+  emergencyDuringMove: boolean;  // emergency during up or down (%M7.0)
+  stopperFault: boolean;         // stopper_not_energize (%M50.4 / Alarm Section bit 12)
+  liftInvalidPos: boolean;       // Lift_not_in_vaild_position (%M50.5 / Alarm Section bit 13)
+  errorInPosition: boolean;      // Error_in_Position (%M50.3 / Alarm Section bit 11)
+  maintenanceDue: boolean;       // ParkDB.Period_Maintanence (DB2,X10.1)
+  autoMode: boolean;             // ParkIO_Data.Auto_DB (DB1,X0.3)
+  manualMode: boolean;           // ParkIO_Data.Manual_DB (DB1,X0.5)
+  alarmWord: number;             // ParkDB."Alarm Word" (DB2,W8)
+  alarmSection: number;          // Alarm Section (%MW50)
   lanes: LaneSensorsSnapshot[];
   spots: Record<string, boolean>; // L11..L43 occupancy
 }
@@ -442,15 +449,17 @@ export class SiemensS7Adapter implements IndustrialController {
         v[`ls_L${lane}_top`] !== undefined ||
         v[`ls_L${lane}_mid`] !== undefined ||
         v[`ls_L${lane}_btm`] !== undefined;
+      const mgProtMapped = v[`mg_prot_L${lane}`] !== undefined;
 
-      const lsTop = hasLiveLs ? Boolean(v[`ls_L${lane}_top`]) : this.softLaneFloor[lane] === 3;
-      const lsMid = hasLiveLs ? Boolean(v[`ls_L${lane}_mid`]) : this.softLaneFloor[lane] === 2;
-      const lsBtm = hasLiveLs ? Boolean(v[`ls_L${lane}_btm`]) : this.softLaneFloor[lane] === 1;
-      const mgProt = v[`mg_prot_L${lane}`] !== undefined ? Boolean(v[`mg_prot_L${lane}`]) : true;
-      const checkLocation = v[`check_loc_L${lane}`] !== undefined ? Boolean(v[`check_loc_L${lane}`]) : true;
+      // NEVER fabricate fake limit-switch ON states when live PLC is connected and %I tags are unmapped!
+      const lsTop = hasLiveLs ? Boolean(v[`ls_L${lane}_top`]) : (!live && this.softLaneFloor[lane] === 3);
+      const lsMid = hasLiveLs ? Boolean(v[`ls_L${lane}_mid`]) : (!live && this.softLaneFloor[lane] === 2);
+      const lsBtm = hasLiveLs ? Boolean(v[`ls_L${lane}_btm`]) : (!live && this.softLaneFloor[lane] === 1);
+      const mgProt = mgProtMapped ? Boolean(v[`mg_prot_L${lane}`]) : !live;
+      const checkLocation = v[`check_loc_L${lane}`] !== undefined ? Boolean(v[`check_loc_L${lane}`]) : false;
       const currentFloor = lsTop ? 3 : lsMid ? 2 : lsBtm ? 1 : 0;
 
-      lanes.push({ lane, lsTop, lsMid, lsBtm, mgProt, checkLocation, currentFloor });
+      lanes.push({ lane, lsTop, lsMid, lsBtm, lsMapped: hasLiveLs, mgProt, mgProtMapped, checkLocation, currentFloor });
     }
 
     const spots: Record<string, boolean> = {};
@@ -466,9 +475,20 @@ export class SiemensS7Adapter implements IndustrialController {
 
     const alarmWord = Number(v.alarm_tag ?? 0);
     const alarmSection = Number(v.alarm_section_tag ?? v.command_error_tag ?? 0);
-    const photocellClear = v.safety_ok_tag !== undefined ? Boolean(v.safety_ok_tag) : true;
+    const photocellClear =
+      v.pcell_inside_db_tag !== undefined
+        ? Boolean(v.pcell_inside_db_tag)
+        : v.safety_ok_tag !== undefined
+          ? Boolean(v.safety_ok_tag)
+          : true;
+    const pcellOutsideClear = v.pcell_outside_db_tag !== undefined ? Boolean(v.pcell_outside_db_tag) : true;
+    const faultDb = Boolean(v.fault_db_tag ?? false);
+    const phaseFail = Boolean(v.pfail_db_tag ?? false);
+    const pumpOverload = Boolean(v.pump_overload_tag ?? false) || Boolean(alarmSection & (1 << 9));
+    const compressorOverload = Boolean(v.compressor_overload_tag ?? false) || Boolean(alarmSection & (1 << 10));
     const emergencyStop =
       (v.emergency_status_tag !== undefined ? Boolean(v.emergency_status_tag) : false) ||
+      Boolean(v.emg_db_tag ?? false) ||
       Boolean(alarmWord & (1 << 0)) ||
       this.softEmergencyStop;
     const emergencyDuringMove =
@@ -480,12 +500,17 @@ export class SiemensS7Adapter implements IndustrialController {
       mode: live ? 'LIVE_PLC' : 'SIMULATED_FALLBACK',
       timestamp: new Date().toISOString(),
       photocellClear,
+      pcellOutsideClear,
+      faultDb,
+      phaseFail,
+      pumpOverload,
+      compressorOverload,
       obstacleExist: Boolean(v.obstacle_exist_tag ?? false),
       emergencyStop,
       emergencyDuringMove,
       stopperFault: Boolean(v.stopper_fault_tag) || Boolean(alarmSection & (1 << 12)),
       liftInvalidPos: Boolean(v.lift_invalid_pos_tag) || Boolean(alarmSection & (1 << 13)),
-      errorInPosition: Boolean(alarmSection & (1 << 11)),
+      errorInPosition: Boolean(v.error_in_position_tag) || Boolean(alarmSection & (1 << 11)),
       maintenanceDue: Boolean(v.maintenance_due_tag ?? false),
       autoMode: v.auto_mode_tag !== undefined ? Boolean(v.auto_mode_tag) : !this.softManualMode,
       manualMode: v.manual_mode_tag !== undefined ? Boolean(v.manual_mode_tag) : this.softManualMode,
