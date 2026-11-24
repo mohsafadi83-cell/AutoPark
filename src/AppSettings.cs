@@ -1329,7 +1329,9 @@ namespace AutoPark
             if (string.IsNullOrEmpty(BackendToken)) return "";
             try
             {
-                string body = "{\"address\":\"" + EscapeJson(address) + "\",\"value\":" + value + ",\"pulseMs\":" + pulseMs + "}";
+                string body = pulseMs > 0
+                    ? "{\"address\":\"" + EscapeJson(address) + "\",\"value\":" + value + ",\"pulseMs\":" + pulseMs + "}"
+                    : "{\"address\":\"" + EscapeJson(address) + "\",\"value\":" + value + "}";
                 return HttpSend("POST", ApiBaseUrl + "/industrial/s7/write", body);
             }
             catch (Exception ex)

@@ -987,12 +987,40 @@ namespace AutoPark
             st.Commands.Insert(0, _activeCmd);
 
             string opCopy = _opType, plateCopy = _chosenPlate, targetSpaceCopy = _chosenSpace.SpaceNumber;
+            int laneCopy = lane, levelCopy = plcLevel;
             bool isOtherCopy = (_opType == "PARK") && _radOtherCar.Checked;
             _backendDispatched = false;
             System.Threading.ThreadPool.QueueUserWorkItem(delegate
             {
-                bool dispatched = ParkState.Instance.PushOperationToBackend(opCopy, plateCopy, isOtherCopy, targetSpaceCopy);
+                var ps = ParkState.Instance;
+                bool dispatched = ps.PushOperationToBackend(opCopy, plateCopy, isOtherCopy, targetSpaceCopy);
                 _backendDispatched = dispatched;
+
+                // Also write the exact verified TIA Portal 2-step Automatic sequence directly to S7-1200 (DB1 / DB2 / %M)
+                // so Automatic Park/Retrieve moves the PLC immediately even before UPDATE_COMPANY_SERVER.bat is run.
+                ps.SendPlcWriteBool("DB1,X2.6", false, 0);   // User_Logoff = 0
+                ps.SendPlcWriteBool("DB1,X0.5", false, 0);   // Manual_DB = 0
+                ps.SendPlcWriteBool("DB1,X2.7", false, 0);   // Sim Manual = 0
+                ps.SendPlcWriteBool("M0.3", false, 0);       // manual_action = 0
+                ps.SendPlcWriteBool("DB1,X0.3", true, 0);    // Auto_DB = 1
+                ps.SendPlcWrite("DB2,B3", laneCopy, 0);      // ParkDB.Lane_Number (Byte @ 3.0)
+                ps.SendPlcWrite("DB2,B4", levelCopy, 0);     // ParkDB.Level_Number (Byte @ 4.0)
+                if (opCopy == "PARK")
+                {
+                    if (laneCopy >= 1 && laneCopy <= 4)
+                        ps.SendPlcWriteBool("M3." + (3 + laneCopy), true, 0); // Lane1..4_check_location
+                    ps.SendPlcWriteBool("DB2,X6.4", false, 0); // Park_OUT = 0
+                    ps.SendPlcWriteBool("DB2,X6.3", true, 0);  // Park_IN = 1
+                    ps.SendPlcWriteBool("DB2,X5.4", false, 0); // ResetBit(Park_Step1_Ready)
+                    ps.SendPlcWriteBool("M10.0", true, 0);     // SetBit(Park_IN_Step1_Start)
+                }
+                else
+                {
+                    ps.SendPlcWriteBool("DB2,X6.3", false, 0); // Park_IN = 0
+                    ps.SendPlcWriteBool("DB2,X6.4", true, 0);  // Park_OUT = 1
+                    ps.SendPlcWriteBool("DB2,X5.4", false, 0); // ResetBit(Park_Step1_Ready)
+                    ps.SendPlcWriteBool("M10.0", true, 0);     // SetBit(Park_IN_Step1_Start)
+                }
             });
             st.NotifyChanged();
 
