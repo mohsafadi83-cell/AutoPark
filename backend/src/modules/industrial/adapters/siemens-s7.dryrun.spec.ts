@@ -201,14 +201,18 @@ describe('SiemensS7Adapter — Safe Dry-Run Simulation (ZERO Physical Movement)'
     expect(seq).toEqual(['DB1,X1.3=false', 'DB1,X1.1=false', 'DB1,X1.5=false', 'DB1,X1.4=true']);
   });
 
-  test('Manual Stoppers S1-S4 toggle manual_action (%M0.3) + Accept_action_manual (%M0.4); Lanes L1-L4 set/reset %M0.3', async () => {
-    const stopperPairs: Array<[string, string]> = [
+  test('Manual Stoppers S1-S4 (Toggle) & Lanes L1-L4 (Momentary) all set/reset manual_action (%M0.3) + Accept_action_manual (%M0.4)', async () => {
+    const pairs: Array<[string, string]> = [
       ['man_s1_tag', 'DB1,X2.2'],
       ['man_s2_tag', 'DB1,X2.3'],
       ['man_s3_tag', 'DB1,X2.4'],
       ['man_s4_tag', 'DB1,X2.5'],
+      ['man_l1_tag', 'DB1,X1.6'],
+      ['man_l2_tag', 'DB1,X1.7'],
+      ['man_l3_tag', 'DB1,X2.0'],
+      ['man_l4_tag', 'DB1,X2.1'],
     ];
-    for (const [key, addr] of stopperPairs) {
+    for (const [key, addr] of pairs) {
       adapter.clearDryRunWrites();
       await adapter.manualControl(key, true);
       expect(adapter.getDryRunWrites().map((w) => `${w.address}=${w.value}`)).toEqual([
@@ -225,28 +229,6 @@ describe('SiemensS7Adapter — Safe Dry-Run Simulation (ZERO Physical Movement)'
         'M0.4=false',
       ]);
     }
-
-    const lanePairs: Array<[string, string]> = [
-      ['man_l1_tag', 'DB1,X1.6'],
-      ['man_l2_tag', 'DB1,X1.7'],
-      ['man_l3_tag', 'DB1,X2.0'],
-      ['man_l4_tag', 'DB1,X2.1'],
-    ];
-    for (const [key, addr] of lanePairs) {
-      adapter.clearDryRunWrites();
-      await adapter.manualControl(key, true);
-      expect(adapter.getDryRunWrites().map((w) => `${w.address}=${w.value}`)).toEqual([
-        `${addr}=true`,
-        'M0.3=true',
-      ]);
-
-      adapter.clearDryRunWrites();
-      await adapter.manualControl(key, false);
-      expect(adapter.getDryRunWrites().map((w) => `${w.address}=${w.value}`)).toEqual([
-        `${addr}=false`,
-        'M0.3=false',
-      ]);
-    }
   });
 
   test('stop_all_manual safely releases all 14 manual controls, manual_action (%M0.3), and Accept_action_manual (%M0.4)', async () => {
@@ -261,7 +243,7 @@ describe('SiemensS7Adapter — Safe Dry-Run Simulation (ZERO Physical Movement)'
     expect(writes.some((w) => w.address === 'M200.0')).toBe(true);
   });
 
-  test('Toggle mode keeps manual_action (%M0.3) and Accept_action_manual (%M0.4) synchronized with active stoppers/lanes', async () => {
+  test('Toggle/Momentary keeps manual_action (%M0.3) and Accept_action_manual (%M0.4) HIGH while any stopper/lane remains active', async () => {
     await adapter.manualControl('stop_all_manual', false);
     adapter.clearDryRunWrites();
 
@@ -269,21 +251,22 @@ describe('SiemensS7Adapter — Safe Dry-Run Simulation (ZERO Physical Movement)'
     await adapter.manualControl('man_l1_tag', true);
     await adapter.manualControl('man_s1_tag', true);
 
-    // Toggle S1 OFF while L1 is still ON -> M0.3 stays TRUE, M0.4 drops to FALSE
+    // Toggle S1 OFF while L1 is still held ON -> both M0.3 and M0.4 stay TRUE
     adapter.clearDryRunWrites();
     await adapter.manualControl('man_s1_tag', false);
     expect(adapter.getDryRunWrites().map((w) => `${w.address}=${w.value}`)).toEqual([
       'DB1,X2.2=false',
       'M0.3=true',
-      'M0.4=false',
+      'M0.4=true',
     ]);
 
-    // Release L1 OFF (last active) -> M0.3 now drops to FALSE
+    // Release L1 OFF (last active) -> both M0.3 and M0.4 drop to FALSE
     adapter.clearDryRunWrites();
     await adapter.manualControl('man_l1_tag', false);
     expect(adapter.getDryRunWrites().map((w) => `${w.address}=${w.value}`)).toEqual([
       'DB1,X1.6=false',
       'M0.3=false',
+      'M0.4=false',
     ]);
   });
 

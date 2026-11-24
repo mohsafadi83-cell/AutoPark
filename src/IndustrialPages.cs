@@ -609,9 +609,9 @@ namespace AutoPark
 
             var holdCard = new Card { Dock = DockStyle.Fill, Padding = new Padding(16), Margin = new Padding(6) };
             var holdTitle = Theme.Label(
-                Loc.T("Direct Manual Controls (Rows 1–3 Toggle | Stoppers S1–S4 also toggle M0.4 | Row 4 Lanes L1–L4 Momentary):",
-                      "التحكم اليدوي المباشر (الصفوف 1–3 تبديل Toggle | Stoppers S1–S4 تبدّل أيضاً M0.4 | الصف السفلي L1–L4 لحظي Momentary):"),
-                Theme.Bold(10.0f), Theme.Primary);
+                Loc.T("Direct Manual Controls (Rows 1–3 Toggle | Row 4 Lanes L1–L4 Momentary | S1–S4 & L1–L4 activate M0.4):",
+                      "التحكم اليدوي المباشر (الصفوف 1–3 تبديل Toggle | الصف السفلي L1–L4 لحظي Momentary | S1–S4 و L1–L4 تفعّل M0.4):"),
+                Theme.Bold(9.8f), Theme.Primary);
             holdTitle.Dock = DockStyle.Top;
             holdTitle.Height = 28;
 
@@ -759,13 +759,14 @@ namespace AutoPark
                 ReleaseMomentary(_activeMomentaryKey, Loc.T("Switching lane", "تبديل مسار"));
 
             _activeMomentaryKey = controlKey;
-            _lblStatus.Text = Loc.T("🟡 Momentary active (Hold): ", "🟡 تشغيل لحظي نشط (Momentary): ") + label + " (" + controlKey + " = 1)";
+            _lblStatus.Text = Loc.T("🟡 Momentary active (Hold): ", "🟡 تشغيل لحظي نشط (Momentary): ") + label + " (" + controlKey + " = 1 + M0.4 = 1)";
             _lblStatus.ForeColor = Theme.Amber;
 
             string keyCopy = controlKey;
             ThreadPool.QueueUserWorkItem(delegate
             {
                 ParkState.Instance.SendManualControl(keyCopy, true);
+                ParkState.Instance.SendPlcWrite("M0.4", 1, 0);
             });
         }
 
@@ -773,15 +774,18 @@ namespace AutoPark
         {
             if (_activeMomentaryKey != controlKey && controlKey != null) return;
             _activeMomentaryKey = null;
-            _lblStatus.Text = Loc.T("🟢 Momentary released (ResetBit = 0): ", "🟢 تم إفلات الزر اللحظي (ResetBit = 0): ") + label;
+            bool keepAcceptHigh = HasAnyActiveStopper();
+            _lblStatus.Text = Loc.T("🟢 Momentary released (ResetBit = 0): ", "🟢 تم إفلات الزر اللحظي (ResetBit = 0): ") + label + " (M0.4 = " + (keepAcceptHigh ? "1" : "0") + ")";
             _lblStatus.ForeColor = Theme.Ok;
 
             string keyCopy = controlKey;
             string lblCopy = label;
+            int m04Val = keepAcceptHigh ? 1 : 0;
             ParkState.Instance.RecordLocalAudit("MANUAL_MOMENTARY", keyCopy, lblCopy, Loc.UserDisplay(_shell.CurrentUser));
             ThreadPool.QueueUserWorkItem(delegate
             {
                 ParkState.Instance.SendManualControl(keyCopy, false);
+                ParkState.Instance.SendPlcWrite("M0.4", m04Val, 0);
             });
         }
 
