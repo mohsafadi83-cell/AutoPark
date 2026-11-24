@@ -577,7 +577,7 @@ export const ParkingPage: React.FC = () => {
                       queryClient.invalidateQueries({ queryKey: ['parkingSpaces'] });
                       queryClient.invalidateQueries({ queryKey: ['parkingRequests'] });
                     } catch (err) {
-                      notify(errorMessage(err), 'error');
+                      notify(errorMessage(err, t), 'error');
                     }
                   }}
                 >
@@ -599,7 +599,7 @@ export const ParkingPage: React.FC = () => {
                       queryClient.invalidateQueries({ queryKey: ['parkingSpaces'] });
                       queryClient.invalidateQueries({ queryKey: ['parkingRequests'] });
                     } catch (err) {
-                      notify(errorMessage(err), 'error');
+                      notify(errorMessage(err, t), 'error');
                     }
                   }}
                 >

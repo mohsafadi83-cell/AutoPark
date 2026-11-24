@@ -70,7 +70,8 @@ export const parkingApi = {
   space: (id: string) => get<ParkingSpace>(`/parking/spaces/${id}`),
   park: (body: { vehicleId?: string; plateNumber?: string; targetSpaceNumber?: string }) =>
     post<ParkingRequest>('/parking/request', body),
-  retrieve: (body: { vehicleId?: string; plateNumber?: string }) => post<ParkingRequest>('/parking/retrieve', body),
+  retrieve: (body: { vehicleId?: string; plateNumber?: string; targetSpaceNumber?: string }) =>
+    post<ParkingRequest>('/parking/retrieve', body),
   requests: (q?: Query) => get<Paginated<ParkingRequest>>('/parking/requests', q),
   request: (id: string) => get<ParkingRequest>(`/parking/requests/${id}`),
   cancel: (id: string) => post<ParkingRequest>(`/parking/requests/${id}/cancel`),
