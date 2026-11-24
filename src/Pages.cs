@@ -1066,24 +1066,79 @@ namespace AutoPark
                 {
                     st.PullSensorsFromBackend();
                     bool lsReached = st.Sensors.LimitSwitches[lane - 1, stepCode - 1];
-                    if (!lsReached && _waitTicks < 24)
+                    // Also accept PLC's own Step-Done / Step2-Ready handshake (Park_Step1_Done DB2,X5.5 / Park_Step2_Ready DB2,X5.6 / Park_Step2_OK DB2,X6.1)
+                    bool plcStepReady = st.Sensors.Step1Done || st.Sensors.Step2Ready || st.Sensors.Step2Done;
+                    bool reached = lsReached || plcStepReady;
+
+                    if (!reached && _waitTicks < 60)
                     {
                         _waitTicks++;
                         _lblElevatorPos.ForeColor = Theme.Amber;
-                        _lblElevatorPos.Text = Loc.T("⏳ Waiting for limit switch PL" + lane + "_LS_" + (stepCode == 3 ? "TOP" : (stepCode == 2 ? "MID" : "BTM")) + " (" + _waitTicks + "/24)...",
-                            "⏳ انتظار تأكيد حساس الحد الفعلي PL" + lane + "_LS_" + (stepCode == 3 ? "TOP" : (stepCode == 2 ? "MID" : "BTM")) + " (" + _waitTicks + "/24)...");
+                        string lsName = "PL" + lane + "_LS_" + (stepCode == 3 ? "TOP" : (stepCode == 2 ? "MID" : "BTM"));
+                        if (_waitTicks % 15 == 0)
+                        {
+                            _lblElevatorPos.Text = Loc.T(
+                                "🔄 Refreshing PLC sensors (" + lsName + " — " + _waitTicks + "/60)...",
+                                "🔄 تحديث قراءة حساسات الـ PLC (" + lsName + " — " + _waitTicks + "/60)...");
+                        }
+                        else
+                        {
+                            _lblElevatorPos.Text = Loc.T(
+                                "⏳ Waiting for " + lsName + " / PLC Step1 Done (" + _waitTicks + "/60)...",
+                                "⏳ انتظار تأكيد الحساس " + lsName + " أو إتمام المرحلة 1 من الـ PLC (" + _waitTicks + "/60)...");
+                        }
                         return;
                     }
-                    if (!lsReached)
+                    if (!reached)
                     {
+                        bool isSafe = !st.EmergencyStop && !st.Sensors.EmergencyPhysical && !st.Sensors.ObstacleExist && st.Sensors.AlarmWord == 0;
+                        if (isSafe)
+                        {
+                            // Safe sensor-stuck auto-recovery: Safe PLC Reset (DB2,X10.0 + M0.5) & fresh sensor sync, never freeze UI
+                            _timer.Stop();
+                            _lblElevatorPos.ForeColor = Theme.Amber;
+                            _lblElevatorPos.Text = Loc.T(
+                                "🔄 Sensor delay detected in safe state — running Safe PLC Reset & sensor refresh...",
+                                "🔄 تأخر في أحد الحساسات والوضع آمن — جاري عمل تحديث وإعادة ضبط آمنة للـ PLC...");
+                            _lblStepStatus.ForeColor = Theme.Amber;
+                            _lblStepStatus.Text = Loc.T(
+                                "✅ Safe Reset & sensor refresh sent. Verify lift position and click Confirm to continue if needed.",
+                                "✅ تم إرسال إعادة الضبط الآمنة وتحديث الحساسات. يمكنك المتابعة أو إعادة المحاولة بأمان.");
+                            _btnCancelStep.Enabled = false;
+                            _btnExecute.Enabled = true;
+                            _cmbVehicle.Enabled = true;
+                            _txtPlate.Enabled = true;
+                            _activeCmd.Status = "RECOVERED";
+                            _activeCmd.CompletedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                            {
+                                st.SendPlcWriteBool("DB2,X10.0", true, 400); // ParkDB.Reset safe pulse
+                                st.SendPlcWriteBool("M0.5", true, 400);      // %M0.5 Reset safe pulse
+                                System.Threading.Thread.Sleep(500);
+                                st.PullSensorsFromBackend();
+                            });
+                            st.NotifyChanged();
+                            return;
+                        }
+
                         _timer.Stop();
                         st.EnsureAlarmActive("POSITION_TIMEOUT", "CRITICAL", "POSITION_TIMEOUT on Lane " + lane + " Floor P" + stepCode, "CLOSED_LOOP_MONITOR");
                         _activeCmd.Status = "FAILED";
                         _lblStepStatus.ForeColor = Theme.Err;
                         _lblStepStatus.Text = Loc.T("🔴 POSITION_TIMEOUT: Floor P" + stepCode + " limit switch did not trigger!", "🔴 خطأ POSITION_TIMEOUT: لم يتفعّل حساس الطابق P" + stepCode + " ضمن المهلة الآمنة!");
                         _btnCancelStep.Enabled = false;
+                        _btnExecute.Enabled = true;
+                        _cmbVehicle.Enabled = true;
+                        _txtPlate.Enabled = true;
                         st.NotifyChanged();
                         return;
+                    }
+                    else
+                    {
+                        _lblElevatorPos.ForeColor = Theme.Ok;
+                        _lblElevatorPos.Text = plcStepReady && !lsReached
+                            ? Loc.T("🟢 PLC Step 1 confirmed ready (Step2_Ready=ON) — advancing to Step 2!", "🟢 الـ PLC أكّد جاهزية المرحلة 2 (Step2_Ready=ON) — جاري إكمال الأمر!")
+                            : Loc.T("🟢 Lift Position (Lane " + lane + "): Floor P" + stepCode + " confirmed ON", "🟢 تأكيد موضع المصعد في المسار " + lane + ": الطابق P" + stepCode + " = ON");
                     }
                 }
                 else if (stepCode >= 1 && stepCode <= 3)
@@ -1101,7 +1156,6 @@ namespace AutoPark
                 if (stepCode == -1)
                 {
                     _activeCmd.Status = "ACKNOWLEDGED";
-                    // Avoid duplicate conflicting PLC writes when the backend /parking/request|retrieve endpoint already owns the 2-step S7 handshake
                     if (!_backendDispatched && !st.BackendConnected)
                     {
                         string spotCode = _chosenSpace != null ? _chosenSpace.SpaceNumber : "";
@@ -1113,6 +1167,12 @@ namespace AutoPark
                 else if (stepCode == -2)
                 {
                     _activeCmd.Status = "EXECUTING";
+                    // Execute exact TIA Portal Page 104 Step 2 command on live S7-1200 PLC to finish the cycle!
+                    System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                    {
+                        st.SendPlcWriteBool("M10.1", true, 0);     // SetBit(Park_IN_Step2_Start)
+                        st.SendPlcWriteBool("DB2,X5.6", false, 0); // ResetBit(Park_Step2_Ready)
+                    });
                     if (!_backendDispatched && !st.BackendConnected)
                     {
                         var appSet = _shell.Settings;

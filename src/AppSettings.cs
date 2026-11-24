@@ -573,6 +573,12 @@ namespace AutoPark
         public bool MaintenanceDue = false;     // ParkDB.Period_Maintanence (DB2,X10.1)
         public bool AutoMode = true;            // ParkIO_Data.Auto_DB (DB1,X0.3)
         public bool ManualMode = false;         // ParkIO_Data.Manual_DB (DB1,X0.5)
+        public bool Step1Ready = false;         // ParkDB.Park_Step1_Ready (DB2,X5.4)
+        public bool Step1Done = false;          // ParkDB.Park_Step1_Done (DB2,X5.5)
+        public bool Step2Ready = false;         // ParkDB.Park_Step2_Ready (DB2,X5.6)
+        public bool Step2Done = false;          // ParkDB.Park_Step2_Done (DB2,X5.7)
+        public bool Step1Ok = false;            // ParkDB.Park_Step1_OK (DB2,X6.0)
+        public bool Step2Ok = false;            // ParkDB.Park_Step2_OK (DB2,X6.1)
         public int AlarmWord = 0;
         public int AlarmSection = 0;
         // Raw PLC process image bytes (IB0..IB3 -> I0.0..I3.7, QB0..QB3 -> Q0.0..Q3.7)
@@ -1233,6 +1239,12 @@ namespace AutoPark
                         if (liveJson.Contains("\"pump_overload_tag\"")) Sensors.PumpOverload = ParseJsonBool(liveJson, "pump_overload_tag", false);
                         if (liveJson.Contains("\"compressor_overload_tag\"")) Sensors.CompressorOverload = ParseJsonBool(liveJson, "compressor_overload_tag", false);
                         if (liveJson.Contains("\"error_in_position_tag\"")) Sensors.ErrorInPosition = Sensors.ErrorInPosition || ParseJsonBool(liveJson, "error_in_position_tag", false);
+                        if (liveJson.Contains("\"step1_ready_tag\"")) Sensors.Step1Ready = ParseJsonBool(liveJson, "step1_ready_tag", false);
+                        if (liveJson.Contains("\"step1_done_tag\"")) Sensors.Step1Done = ParseJsonBool(liveJson, "step1_done_tag", false);
+                        if (liveJson.Contains("\"step2_ready_tag\"")) Sensors.Step2Ready = ParseJsonBool(liveJson, "step2_ready_tag", false);
+                        if (liveJson.Contains("\"step2_done_tag\"")) Sensors.Step2Done = ParseJsonBool(liveJson, "step2_done_tag", false);
+                        if (liveJson.Contains("\"step1_ok_tag\"")) Sensors.Step1Ok = ParseJsonBool(liveJson, "step1_ok_tag", false);
+                        if (liveJson.Contains("\"step2_ok_tag\"")) Sensors.Step2Ok = ParseJsonBool(liveJson, "step2_ok_tag", false);
 
                         // Accurately detect whether each lane's %I limit switch / MG_PROT tags are actually mapped in live PLC values
                         for (int lane = 1; lane <= 4; lane++)
