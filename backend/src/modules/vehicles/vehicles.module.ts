@@ -4,6 +4,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsOptional, IsString } from 'class-validator';
 import { In, IsNull, Repository } from 'typeorm';
+import { AppCacheService } from '../../common/cache.module';
 import {
   AuthUser, CurrentUser, ReqMeta, RequestMeta, RequireAnyPermission,
 } from '../../common/decorators';
@@ -46,26 +47,31 @@ export class VehiclesService {
     @InjectRepository(ParkingRequestEntity) private readonly reqRepo: Repository<ParkingRequestEntity>,
     @InjectRepository(UserEntity) private readonly userRepo: Repository<UserEntity>,
     private readonly audit: AuditService,
+    private readonly cache: AppCacheService,
   ) {}
 
   async list(user: AuthUser, q: VehicleQuery) {
     const canAny = hasPermission(user.role, Permission.VEHICLES_MANAGE_ANY) || hasPermission(user.role, Permission.PARKING_REQUEST_ANY);
-    const qb = this.vehRepo
-      .createQueryBuilder('v')
-      .leftJoinAndSelect('v.user', 'u')
-      .where('v.deleted_at IS NULL')
-      .orderBy('v.createdAt', 'DESC');
+    const scope = canAny ? `any:${q.userId ?? 'all'}` : `own:${user.id}`;
+    const cacheKey = `vehicles:list:${scope}:${(q.q ?? '').trim().toLowerCase()}`;
+    return this.cache.getOrSet(cacheKey, 5000, async () => {
+      const qb = this.vehRepo
+        .createQueryBuilder('v')
+        .leftJoinAndSelect('v.user', 'u')
+        .where('v.deleted_at IS NULL')
+        .orderBy('v.createdAt', 'DESC');
 
-    if (!canAny) {
-      qb.andWhere('v.user_id = :uid', { uid: user.id });
-    } else if (q.userId) {
-      qb.andWhere('v.user_id = :uid', { uid: q.userId });
-    }
-    if (q.q) {
-      qb.andWhere('(v.plate_number ILIKE :q OR v.brand ILIKE :q OR v.model ILIKE :q)', { q: `%${q.q}%` });
-    }
-    const list = await qb.getMany();
-    return this.enrichWithSpaces(list);
+      if (!canAny) {
+        qb.andWhere('v.user_id = :uid', { uid: user.id });
+      } else if (q.userId) {
+        qb.andWhere('v.user_id = :uid', { uid: q.userId });
+      }
+      if (q.q) {
+        qb.andWhere('(v.plate_number ILIKE :q OR v.brand ILIKE :q OR v.model ILIKE :q)', { q: `%${q.q}%` });
+      }
+      const list = await qb.getMany();
+      return this.enrichWithSpaces(list);
+    });
   }
 
   async findOne(id: string, user: AuthUser) {
@@ -100,6 +106,7 @@ export class VehiclesService {
       color: dto.color?.trim() || null,
     });
     saved.user = owner;
+    this.cache.invalidatePrefix('vehicles:');
 
     await this.audit.log({
       userId: user.id,
@@ -134,6 +141,7 @@ export class VehiclesService {
     if (dto.color !== undefined) v.color = dto.color?.trim() || null;
 
     const saved = await this.vehRepo.save(v);
+    this.cache.invalidatePrefix('vehicles:');
     await this.audit.log({
       userId: user.id,
       username: user.username,
@@ -169,6 +177,7 @@ export class VehiclesService {
 
     v.deletedAt = new Date();
     await this.vehRepo.save(v);
+    this.cache.invalidatePrefix('vehicles:');
     await this.audit.log({
       userId: user.id,
       username: user.username,

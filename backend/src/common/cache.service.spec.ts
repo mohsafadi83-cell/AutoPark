@@ -75,4 +75,21 @@ describe('AppCacheService — Database Read-Through Cache', () => {
     const v2 = await cache.getOrSet('alarms:counts', 260, async () => ++dbCalls);
     expect(v2).toBe(2);
   });
+
+  test('tracks per-namespace hit rates and supports full cache flush', async () => {
+    await cache.getOrSet('auth:user:u1', 10000, async () => ({ id: 'u1' }));
+    await cache.getOrSet('auth:user:u1', 10000, async () => ({ id: 'u1' }));
+    await cache.getOrSet('vehicles:list:all', 10000, async () => [{ plate: '10-45821' }]);
+
+    const stats = cache.getStats();
+    expect(stats.backend).toBe('memory');
+    expect(stats.byNamespace.auth.hits).toBe(1);
+    expect(stats.byNamespace.auth.misses).toBe(1);
+    expect(stats.byNamespace.auth.hitRatePct).toBe(50);
+    expect(stats.byNamespace.vehicles.misses).toBe(1);
+
+    const flushed = cache.clear();
+    expect(flushed).toBe(2);
+    expect(cache.getStats().entries).toBe(0);
+  });
 });

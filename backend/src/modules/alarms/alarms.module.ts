@@ -36,16 +36,19 @@ export class AlarmsService {
 
   async list(q: AlarmQuery) {
     const { page, limit, skip, take } = pageParams(q);
-    const qb = this.alarmRepo
-      .createQueryBuilder('a')
-      .leftJoinAndSelect('a.acknowledgedByUser', 'u')
-      .orderBy('a.createdAt', 'DESC')
-      .skip(skip)
-      .take(take);
-    if (q.status) qb.andWhere('a.status = :st', { st: q.status });
-    if (q.severity) qb.andWhere('a.severity = :sev', { sev: q.severity });
-    const [rows, total] = await qb.getManyAndCount();
-    return paginated(rows.map((r) => this.toDto(r)), total, page, limit);
+    const cacheKey = `alarms:list:${q.status ?? 'all'}:${q.severity ?? 'all'}:${page}:${limit}`;
+    return this.cache.getOrSet(cacheKey, 3000, async () => {
+      const qb = this.alarmRepo
+        .createQueryBuilder('a')
+        .leftJoinAndSelect('a.acknowledgedByUser', 'u')
+        .orderBy('a.createdAt', 'DESC')
+        .skip(skip)
+        .take(take);
+      if (q.status) qb.andWhere('a.status = :st', { st: q.status });
+      if (q.severity) qb.andWhere('a.severity = :sev', { sev: q.severity });
+      const [rows, total] = await qb.getManyAndCount();
+      return paginated(rows.map((r) => this.toDto(r)), total, page, limit);
+    });
   }
 
   async countUnresolved(): Promise<{ total: number; critical: number }> {

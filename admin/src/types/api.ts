@@ -447,3 +447,34 @@ export interface VehicleMovingEvent {
   progress: number;
   phase: string;
 }
+
+export interface CacheNamespaceStats {
+  hits: number;
+  misses: number;
+  invalidations: number;
+  hitRatePct: number;
+}
+
+export interface CacheStatsSnapshot {
+  backend: 'memory' | 'redis+memory';
+  redisConfigured: boolean;
+  redisConnected: boolean;
+  entries: number;
+  maxEntries: number;
+  hits: number;
+  misses: number;
+  sets: number;
+  invalidations: number;
+  dedupedInFlight: number;
+  redisHits: number;
+  redisErrors: number;
+  hitRatePct: number;
+  byNamespace: Record<string, CacheNamespaceStats>;
+}
+
+export interface CacheFlushResponse {
+  ok: boolean;
+  flushedEntries: number;
+  stats: CacheStatsSnapshot;
+  time: string;
+}

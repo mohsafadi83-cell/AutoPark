@@ -1,14 +1,14 @@
-import { Controller, Get, Global, Inject, Module } from '@nestjs/common';
+import { Controller, Get, Global, HttpCode, Inject, Module, Post } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import { AppCacheService, CacheModule } from './common/cache.module';
-import { Public, RequirePermissions } from './common/decorators';
+import { AuthUser, CurrentUser, Public, ReqMeta, RequestMeta, RequirePermissions } from './common/decorators';
 import { Permission } from './common/permissions';
 import { APP_CONFIG, AppConfig, loadConfig } from './config/app.config';
 import { DatabaseModule } from './database/database.module';
 import { AlarmsModule } from './modules/alarms/alarms.module';
-import { AuditModule } from './modules/audit/audit.module';
+import { AuditModule, AuditService } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DevicesModule } from './modules/devices/devices.module';
 import { IndustrialModule } from './modules/industrial/industrial.module';
@@ -25,6 +25,7 @@ export class HealthController {
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
     private readonly industrial: IndustrialIntegrationService,
     private readonly cache: AppCacheService,
+    private readonly audit: AuditService,
   ) {}
 
   @Public()
@@ -38,7 +39,11 @@ export class HealthController {
       adapter: st.adapter,
       controllerConnected: st.controllerConnected,
       cache: {
+        backend: cacheStats.backend,
+        redisConnected: cacheStats.redisConnected,
         entries: cacheStats.entries,
+        hits: cacheStats.hits,
+        misses: cacheStats.misses,
         hitRatePct: cacheStats.hitRatePct,
       },
       time: new Date().toISOString(),
@@ -46,9 +51,31 @@ export class HealthController {
   }
 
   @Get('cache')
-  @RequirePermissions(Permission.DIAGNOSTICS_VIEW)
+  @RequirePermissions(Permission.SYSTEM_MONITOR)
   cacheStats() {
     return this.cache.getStats();
+  }
+
+  @Post('cache/flush')
+  @HttpCode(200)
+  @RequirePermissions(Permission.CONFIG_MANAGE)
+  async flushCache(@CurrentUser() user: AuthUser, @ReqMeta() meta: RequestMeta) {
+    const flushedEntries = this.cache.clear();
+    await this.audit.log({
+      userId: user.id,
+      username: user.username,
+      action: 'CACHE_FLUSH',
+      entity: 'system_cache',
+      ipAddress: meta.ip,
+      userAgent: meta.userAgent,
+      details: { flushedEntries },
+    });
+    return {
+      ok: true,
+      flushedEntries,
+      stats: this.cache.getStats(),
+      time: new Date().toISOString(),
+    };
   }
 }
 

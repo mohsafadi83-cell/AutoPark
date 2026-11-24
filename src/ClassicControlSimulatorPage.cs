@@ -45,9 +45,11 @@ namespace AutoPark
         public bool Kt1Coil = false;       // On-Delay Timer Coil
         public bool Kt1Done = false;       // On-Delay Timer Timed-Out Contact
 
-        // Timer & physics
+        // Timer & physics (+ IEC 60947-4-1 100ms Star-Delta open-transition dead-time)
         public double TimerSetpointSec = 5.0;
         public double TimerElapsedSec = 0.0;
+        public double StarDeltaDeadTimeSec = 0.10;
+        public double StarDeltaDeadElapsedSec = 0.0;
         public double MotorRpm = 0.0;      // -1450..+1450 RPM
         public double MotorAngleDeg = 0.0; // Visual rotor angle
         public double MotorAmps = 0.0;     // Simulated line current (A)
@@ -78,6 +80,7 @@ namespace AutoPark
             Kt1Coil = false;
             Kt1Done = false;
             TimerElapsedSec = 0.0;
+            StarDeltaDeadElapsedSec = 0.0;
             MotorRpm = 0.0;
             MotorAmps = 0.0;
             LiftPositionPct = 0.0;
@@ -321,6 +324,112 @@ namespace AutoPark
                 if (Km3 != prevKm3) log(Km3 ? "[KM3] Energized (ON)" : "[KM3] De-energized (OFF)");
                 if (Kt1Done && !prevKtDone) log("[KT1] Timer elapsed (" + TimerSetpointSec.ToString("0.0") + "s) -> Contacts switched");
             }
+        }
+
+        /// <summary>
+        /// Programmatic real-world electrical circuit & interlock verification suite.
+        /// Verifies all 5 classic control modes, safety chain trips, NC cross-interlock anti-plugging,
+        /// IEC Star-Delta open-transition dead-time, hydraulic lift limit switches, and TIA Portal floor mapping.
+        /// </summary>
+        public static string RunCircuitSelfTest(out int passed, out int failed)
+        {
+            int pCount = 0;
+            int fCount = 0;
+            var sb = new System.Text.StringBuilder();
+
+            Action<string, bool, string> check = delegate (string name, bool cond, string detail)
+            {
+                if (cond) { pCount++; sb.AppendLine("[PASS] " + name); }
+                else { fCount++; sb.AppendLine("[FAIL] " + name + " -> " + detail); }
+            };
+
+            // 1. DOL Latching: S1 latches KM1, S0 drops KM1, E-Stop/Overload/PhaseFail drop KM1
+            var dol = new ClassicControlState { Mode = ClassicCircuitMode.DolLatch };
+            dol.PbStart1 = true; dol.Step(0.05, null);
+            dol.PbStart1 = false; dol.Step(0.05, null);
+            check("DOL-1: S1 start latches KM1 via 13-14 NO aux contact", dol.Km1 && !dol.Km2 && !dol.Km3, "Km1=" + dol.Km1);
+            dol.PbStop = true; dol.Step(0.05, null); dol.PbStop = false; dol.Step(0.05, null);
+            check("DOL-2: S0 NC stop button de-energizes KM1", !dol.Km1, "Km1=" + dol.Km1);
+            dol.PbStart1 = true; dol.Step(0.05, null); dol.PbStart1 = false;
+            dol.OverloadTrip = true; dol.Step(0.05, null);
+            check("DOL-3: Thermal Overload (F2 95-96) trips KM1 immediately", !dol.Km1, "Km1=" + dol.Km1);
+            dol.OverloadTrip = false; dol.PbStart1 = true; dol.Step(0.05, null); dol.PbStart1 = false;
+            dol.EStopPressed = true; dol.Step(0.05, null);
+            check("DOL-4: Emergency Stop NC cuts control power and drops KM1", !dol.Km1 && !dol.ControlPowerOk, "Km1=" + dol.Km1);
+
+            // 2. Fwd/Rev NC Cross-Interlock (CRITICAL Anti-Plugging Verification)
+            var fr = new ClassicControlState { Mode = ClassicCircuitMode.FwdRevInterlock };
+            fr.PbStart1 = true; fr.Step(0.05, null); fr.PbStart1 = false; fr.Step(0.05, null);
+            check("FWDREV-1: S1 latches KM1 (Forward)", fr.Km1 && !fr.Km2, "Km1=" + fr.Km1 + ",Km2=" + fr.Km2);
+            // Attempt illegal direct reverse while KM1 is running!
+            fr.PbStart2 = true; fr.Step(0.05, null);
+            check("FWDREV-2: Pressing S2 (REV) while KM1 runs is BLOCKED (anti-plugging NC interlock)", fr.Km1 && !fr.Km2 && fr.InterlockBlocked, "Km1=" + fr.Km1 + ",Km2=" + fr.Km2 + ",Blocked=" + fr.InterlockBlocked);
+            fr.PbStart2 = false;
+            // Must press STOP first, then S2 energizes KM2
+            fr.PbStop = true; fr.Step(0.05, null); fr.PbStop = false; fr.Step(0.05, null);
+            fr.PbStart2 = true; fr.Step(0.05, null); fr.PbStart2 = false; fr.Step(0.05, null);
+            check("FWDREV-3: After STOP, S2 cleanly latches KM2 (Reverse)", !fr.Km1 && fr.Km2, "Km1=" + fr.Km1 + ",Km2=" + fr.Km2);
+            // Attempt illegal direct forward while KM2 is running!
+            fr.PbStart1 = true; fr.Step(0.05, null);
+            check("FWDREV-4: Pressing S1 (FWD) while KM2 runs is BLOCKED (anti-plugging NC interlock)", !fr.Km1 && fr.Km2 && fr.InterlockBlocked, "Km1=" + fr.Km1 + ",Km2=" + fr.Km2);
+            fr.PbStart1 = false;
+            // Simultaneous S1+S2 from standstill must block both
+            fr.ResetAll();
+            fr.PbStart1 = true; fr.PbStart2 = true; fr.Step(0.05, null);
+            check("FWDREV-5: Simultaneous S1+S2 from standstill energizes neither contactor", !fr.Km1 && !fr.Km2 && fr.InterlockBlocked, "Km1=" + fr.Km1 + ",Km2=" + fr.Km2);
+
+            // 3. Star-Delta Starter with IEC 60947-4-1 100ms Open-Transition Dead-Time
+            var sd = new ClassicControlState { Mode = ClassicCircuitMode.StarDeltaTimer, TimerSetpointSec = 0.20, StarDeltaDeadTimeSec = 0.10 };
+            sd.PbStart1 = true; sd.Step(0.05, null); sd.PbStart1 = false;
+            check("STARDELTA-1: Initial start energizes KM1 (Main) + KM2 (Star), KM3 OFF", sd.Km1 && sd.Km2 && !sd.Km3, "Km1=" + sd.Km1 + ",Km2=" + sd.Km2 + ",Km3=" + sd.Km3);
+            sd.Step(0.15, null); // Timer reaches 0.20s -> KT1 done, KM2 drops, dead-time starts (0.05s < 0.10s)
+            check("STARDELTA-2: At timer expiry, KM2 (Star) drops and KM3 (Delta) waits for open-transition dead-time", sd.Km1 && !sd.Km2 && !sd.Km3 && sd.Kt1Done, "Km2=" + sd.Km2 + ",Km3=" + sd.Km3);
+            sd.Step(0.06, null); // Dead-time >= 0.10s -> KM3 energizes cleanly
+            check("STARDELTA-3: After 100ms dead-time, KM3 (Delta) energizes with KM2 OFF", sd.Km1 && !sd.Km2 && sd.Km3, "Km2=" + sd.Km2 + ",Km3=" + sd.Km3);
+
+            // 4. AutoPark Hydraulic Lift Panel (Hold-to-Run, Photocell, Limit Switches, Mutual Exclusion)
+            var hyd = new ClassicControlState { Mode = ClassicCircuitMode.AutoParkHydraulic, LiftPositionPct = 0.0 };
+            hyd.PbStart1 = true; hyd.Step(0.05, null);
+            check("HYD-1: Hold S1 (UP) energizes KM1 (Pump) + KM2 (UP Valve), KM3 OFF", hyd.Km1 && hyd.Km2 && !hyd.Km3, "Km1=" + hyd.Km1 + ",Km2=" + hyd.Km2 + ",Km3=" + hyd.Km3);
+            hyd.PbStart1 = false; hyd.Step(0.05, null);
+            check("HYD-2: Release S1 (Hold-to-Run) immediately de-energizes Pump & UP Valve", !hyd.Km1 && !hyd.Km2 && !hyd.Km3, "Km1=" + hyd.Km1 + ",Km2=" + hyd.Km2);
+            hyd.PhotocellBlocked = true; hyd.PbStart1 = true; hyd.Step(0.05, null);
+            check("HYD-3: Blocked entrance photocell inhibits lift UP motion", !hyd.Km1 && !hyd.Km2 && hyd.InterlockBlocked, "Km1=" + hyd.Km1);
+            hyd.PhotocellBlocked = false; hyd.PbStart1 = false;
+            hyd.LiftPositionPct = 50.0; hyd.PbStart2 = true; hyd.Step(0.05, null);
+            check("HYD-4: Hold S2 (DOWN) opens KM3 (DOWN Valve) gravity return without Pump (KM1 OFF)", !hyd.Km1 && !hyd.Km2 && hyd.Km3, "Km1=" + hyd.Km1 + ",Km3=" + hyd.Km3);
+            hyd.PbStart1 = true; hyd.PbStart2 = true; hyd.Step(0.05, null);
+            check("HYD-5: Simultaneous UP+DOWN inhibited (no solenoid conflict)", !hyd.Km1 && !hyd.Km2 && !hyd.Km3 && hyd.InterlockBlocked, "Km2=" + hyd.Km2 + ",Km3=" + hyd.Km3);
+            hyd.PbStart1 = true; hyd.PbStart2 = false; hyd.LiftPositionPct = 100.0; hyd.Step(0.05, null);
+            check("HYD-6: LS_TOP limit switch stops UP motion at 100%", !hyd.Km1 && !hyd.Km2 && hyd.LsTopOrFwd, "Km1=" + hyd.Km1 + ",LsTop=" + hyd.LsTopOrFwd);
+
+            // 5. Sequential Two-Motor Starter (KM1 -> KT1 -> KM2)
+            var seq = new ClassicControlState { Mode = ClassicCircuitMode.SequentialTwoMotor, TimerSetpointSec = 0.10 };
+            seq.PbStart1 = true; seq.Step(0.05, null); seq.PbStart1 = false;
+            check("SEQ-1: Motor 1 (KM1) starts first while Motor 2 (KM2) waits on KT1", seq.Km1 && !seq.Km2, "Km1=" + seq.Km1 + ",Km2=" + seq.Km2);
+            seq.Step(0.06, null);
+            check("SEQ-2: Motor 2 (KM2) starts automatically after KT1 delay", seq.Km1 && seq.Km2 && seq.Kt1Done, "Km1=" + seq.Km1 + ",Km2=" + seq.Km2);
+
+            // 6. TIA Portal V17 Direct Floor Mapping Verification (P1->1, P2->2, P3->3)
+            check("PLC-MAP-1: Direct floor mapping P1->1, P2->2, P3->3",
+                AppSettings.MapUiFloorToPlcLevel(1) == 1 &&
+                AppSettings.MapUiFloorToPlcLevel(2) == 2 &&
+                AppSettings.MapUiFloorToPlcLevel(3) == 3 &&
+                AppSettings.MapPlcLevelToUiFloor(1) == 1 &&
+                AppSettings.MapPlcLevelToUiFloor(3) == 3,
+                "P1->" + AppSettings.MapUiFloorToPlcLevel(1) + ", P3->" + AppSettings.MapUiFloorToPlcLevel(3));
+
+            check("PLC-TAGS-1: Verified S7-1200 tag defaults (DB2,B3 / DB2,B4 / DB2,X6.3 / M0.3 / M0.5)",
+                AppSettings.GetDefaultTagAddress("lane_number_tag") == "DB2,B3" &&
+                AppSettings.GetDefaultTagAddress("level_number_tag") == "DB2,B4" &&
+                AppSettings.GetDefaultTagAddress("park_command_tag") == "DB2,X6.3" &&
+                AppSettings.GetDefaultTagAddress("manual_action_tag") == "M0.3" &&
+                AppSettings.GetDefaultTagAddress("reset_m_tag") == "M0.5",
+                "lane=" + AppSettings.GetDefaultTagAddress("lane_number_tag"));
+
+            passed = pCount;
+            failed = fCount;
+            return sb.ToString();
         }
     }
 

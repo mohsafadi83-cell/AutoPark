@@ -93,39 +93,44 @@ export class SeedService implements OnModuleInit {
   }
 
   private async seedIntegrationConfig() {
+    // Verified TIA Portal V17 tag addresses for TECHNO Electrical.Jo S7-1200 (192.168.0.27:102)
     const liveS7Tags: Record<string, { address: string; dataType: string; access: string; description: string }> = {
-      system_ready_tag: { address: 'M3.7', dataType: 'BOOL', access: 'R', description: 'S7-1200 System Ready flag (MB3 bit 7)' },
-      emergency_status_tag: { address: 'M0.0', dataType: 'BOOL', access: 'R', description: 'S7-1200 Emergency Stop status' },
-      safety_ok_tag: { address: 'I0.7', dataType: 'BOOL', access: 'R', description: 'S7-1200 Safety circuit input (IB0 bit 7)' },
-      heartbeat_tag: { address: 'DB2,INT2', dataType: 'INT', access: 'R', description: 'S7-1200 DB2 word 2 status/heartbeat' },
-      machine_state_tag: { address: 'DB2,B4', dataType: 'INT', access: 'R', description: 'S7-1200 DB2 byte 4 machine state' },
+      system_ready_tag: { address: 'DB1,X0.3', dataType: 'BOOL', access: 'R', description: 'ParkIO_Data.Auto_DB (System Auto/Ready)' },
+      emergency_status_tag: { address: 'M50.0', dataType: 'BOOL', access: 'R', description: 'Alarm Section bit 0 (Emergency Stop active)' },
+      safety_ok_tag: { address: 'I0.7', dataType: 'BOOL', access: 'R', description: 'PCELL_IN_1 Entrance Photocell safety input' },
+      heartbeat_tag: { address: 'M60.3', dataType: 'BOOL', access: 'R', description: 'Clock_2Hz S7-1200 PLC heartbeat pulse' },
+      machine_state_tag: { address: 'DB2,B4', dataType: 'INT', access: 'R', description: 'ParkDB.Level_Number / active floor state' },
       parking_space_status_tag: { address: 'IB0', dataType: 'WORD', access: 'R', description: 'S7-1200 Digital input sensors IB0..IB2' },
-      vehicle_position_tag: { address: 'MB13', dataType: 'INT', access: 'R', description: 'S7-1200 Merker byte MB13 position' },
-      alarm_tag: { address: 'MW20', dataType: 'WORD', access: 'R', description: 'S7-1200 Alarm word MW20' },
-      park_command_tag: { address: 'DB1,X0.0', dataType: 'BOOL', access: 'W', description: 'S7-1200 Park command trigger' },
-      retrieve_command_tag: { address: 'DB1,X0.1', dataType: 'BOOL', access: 'W', description: 'S7-1200 Retrieve command trigger' },
-      command_id_tag: { address: 'DB1,INT2', dataType: 'INT', access: 'W', description: 'S7-1200 Command ID word' },
-      target_space_tag: { address: 'MW10', dataType: 'INT', access: 'W', description: 'S7-1200 Target spot number' },
-      command_acknowledgement_tag: { address: 'DB2,INT2', dataType: 'INT', access: 'R', description: 'S7-1200 Command acknowledgement' },
-      command_complete_tag: { address: 'DB2,INT6', dataType: 'INT', access: 'R', description: 'S7-1200 Command completion' },
-      command_error_tag: { address: 'MW22', dataType: 'INT', access: 'R', description: 'S7-1200 Error word' },
+      vehicle_position_tag: { address: 'DB2,B3', dataType: 'INT', access: 'R', description: 'ParkDB.Lane_Number (1..4)' },
+      alarm_tag: { address: 'DB2,W8', dataType: 'WORD', access: 'R', description: 'ParkDB.Alarm_Word (S7-1200 active alarm word)' },
+      park_command_tag: { address: 'DB2,X6.3', dataType: 'BOOL', access: 'W', description: 'ParkDB.Park_IN command trigger' },
+      retrieve_command_tag: { address: 'DB2,X6.4', dataType: 'BOOL', access: 'W', description: 'ParkDB.Park_OUT command trigger' },
+      command_id_tag: { address: 'DB2,B3', dataType: 'INT', access: 'W', description: 'ParkDB.Lane_Number (1..4)' },
+      target_space_tag: { address: 'DB2,B4', dataType: 'INT', access: 'W', description: 'ParkDB.Level_Number (1..3 direct)' },
+      command_acknowledgement_tag: { address: 'DB2,X6.0', dataType: 'BOOL', access: 'R', description: 'ParkDB.Park_Step1_OK acknowledgement' },
+      command_complete_tag: { address: 'DB2,X6.1', dataType: 'BOOL', access: 'R', description: 'ParkDB.Park_Step2_OK completion' },
+      command_error_tag: { address: 'MW50', dataType: 'WORD', access: 'R', description: 'Alarm Section word (%MW50)' },
     };
 
     const existing = await this.configRepo.findOne({ where: { id: 1 } });
     if (existing) {
-      const s = (existing.settings ?? {}) as Record<string, unknown>;
-      if (s.host !== '192.168.0.27' || existing.protocol !== 'SIEMENS_S7') {
-        existing.protocol = 'SIEMENS_S7';
-        existing.settings = {
-          ...s,
-          plcModel: 'Siemens SIMATIC S7-1200 (192.168.0.27:102) + HMI KTP400 (192.168.0.30:5900)',
-          host: '192.168.0.27',
-          port: 102,
-          rack: 0,
-          slot: 1,
-        };
-        existing.tagMap = liveS7Tags;
-        await this.configRepo.save(existing);
+      // Never overwrite MOCK/SIMULATION/test environments with live PLC settings
+      const wantsLiveS7 = !this.cfg.isTest && this.cfg.industrial.protocol === 'SIEMENS_S7';
+      if (wantsLiveS7) {
+        const s = (existing.settings ?? {}) as Record<string, unknown>;
+        if (!s.host || existing.protocol !== 'SIEMENS_S7') {
+          existing.protocol = 'SIEMENS_S7';
+          existing.settings = {
+            ...s,
+            plcModel: (s.plcModel as string) || 'Siemens SIMATIC S7-1200 (192.168.0.27:102) + HMI KTP400 (192.168.0.30:5900)',
+            host: (s.host as string) || this.cfg.industrial.host || '192.168.0.27',
+            port: (s.port as number) || this.cfg.industrial.port || 102,
+            rack: (s.rack as number) ?? 0,
+            slot: (s.slot as number) ?? 1,
+          };
+          existing.tagMap = { ...liveS7Tags, ...(existing.tagMap ?? {}) };
+          await this.configRepo.save(existing);
+        }
       }
       return;
     }

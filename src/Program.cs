@@ -55,9 +55,20 @@ namespace AutoPark
 
             if (Array.IndexOf(args, "--selftest") >= 0)
             {
+                int passed, failed;
+                string circuitReport = ClassicControlState.RunCircuitSelfTest(out passed, out failed);
+                string summary = string.Format(
+                    "Status={0} Spaces={1} Protocol={2} Lang={3} CircuitsPassed={4} CircuitsFailed={5}\r\n{6}",
+                    failed == 0 ? "OK" : "FAIL",
+                    ParkState.Instance.Spaces.Count,
+                    settings.Protocol,
+                    Loc.Lang,
+                    passed,
+                    failed,
+                    circuitReport);
                 string outFile = Path.Combine(Path.GetTempPath(), "AutoPark_selftest.txt");
-                File.WriteAllText(outFile, "OK Spaces=" + ParkState.Instance.Spaces.Count + " Protocol=" + settings.Protocol + " Lang=" + Loc.Lang);
-                return 0;
+                File.WriteAllText(outFile, summary, System.Text.Encoding.UTF8);
+                return failed == 0 ? 0 : 2;
             }
 
             while (true)

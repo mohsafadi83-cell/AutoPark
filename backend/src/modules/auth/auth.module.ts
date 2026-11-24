@@ -4,6 +4,7 @@ import {
 } from '@nestjs/common';
 import { APP_GUARD, Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import { Throttle } from '@nestjs/throttler';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcryptjs';
 import {
@@ -12,6 +13,7 @@ import {
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 import { APP_CONFIG, AppConfig } from '../../config/app.config';
+import { AppCacheService } from '../../common/cache.module';
 import {
   ANY_PERMISSIONS_KEY, AuthUser, CurrentUser, IS_PUBLIC_KEY, PERMISSIONS_KEY, Public, ReqMeta, RequestMeta,
 } from '../../common/decorators';
@@ -86,7 +88,15 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly audit: AuditService,
     private readonly devices: DevicesService,
+    private readonly cache: AppCacheService,
   ) {}
+
+  private invalidateUserCache(userId: string) {
+    this.cache.delete(`auth:user:${userId}`);
+    this.cache.delete(`auth:me:${userId}`);
+    this.cache.delete(`auth:prefs:${userId}`);
+    this.cache.invalidatePrefix('users:');
+  }
 
   private hashToken(raw: string): string {
     return createHash('sha256').update(raw).digest('hex');
@@ -161,6 +171,7 @@ export class AuthService {
     if (user.status === UserStatus.LOCKED) user.status = UserStatus.ACTIVE;
     user.lastLogin = new Date();
     await this.usersRepo.save(user);
+    this.invalidateUserCache(user.id);
 
     const tokens = await this.issueTokens(user, randomUUID(), meta);
     await this.audit.log({
@@ -236,9 +247,11 @@ export class AuthService {
   }
 
   async getMe(userId: string) {
-    const user = await this.usersRepo.findOne({ where: { id: userId } });
-    if (!user) throw AppError.notFound('User');
-    return toUserDto(user);
+    return this.cache.getOrSet(`auth:me:${userId}`, 10_000, async () => {
+      const user = await this.usersRepo.findOne({ where: { id: userId } });
+      if (!user) throw AppError.notFound('User');
+      return toUserDto(user);
+    });
   }
 
   async updateMe(userId: string, dto: UpdateProfileDto, meta: RequestMeta) {
@@ -249,6 +262,7 @@ export class AuthService {
     if (dto.phone !== undefined) user.phone = dto.phone.trim() || null;
     if (dto.language !== undefined) user.language = dto.language;
     const saved = await this.usersRepo.save(user);
+    this.invalidateUserCache(user.id);
     await this.audit.log({
       userId: user.id,
       username: user.username,
@@ -275,6 +289,7 @@ export class AuthService {
     user.passwordHash = await bcrypt.hash(dto.newPassword, rounds);
     user.passwordChangedAt = new Date();
     await this.usersRepo.save(user);
+    this.invalidateUserCache(user.id);
 
     await this.rtRepo
       .createQueryBuilder()
@@ -295,14 +310,16 @@ export class AuthService {
   }
 
   async getPreferences(userId: string) {
-    const u = await this.usersRepo.findOne({ where: { id: userId } });
-    if (!u) throw AppError.notFound('User');
-    return {
-      language: u.language ?? 'ar',
-      notifyParking: u.preferences?.notifyParking ?? true,
-      notifyAlarms: u.preferences?.notifyAlarms ?? true,
-      notifyMaintenance: u.preferences?.notifyMaintenance ?? true,
-    };
+    return this.cache.getOrSet(`auth:prefs:${userId}`, 15_000, async () => {
+      const u = await this.usersRepo.findOne({ where: { id: userId } });
+      if (!u) throw AppError.notFound('User');
+      return {
+        language: u.language ?? 'ar',
+        notifyParking: u.preferences?.notifyParking ?? true,
+        notifyAlarms: u.preferences?.notifyAlarms ?? true,
+        notifyMaintenance: u.preferences?.notifyMaintenance ?? true,
+      };
+    });
   }
 
   async updatePreferences(userId: string, dto: UpdatePreferencesDto) {
@@ -315,6 +332,7 @@ export class AuthService {
       notifyMaintenance: dto.notifyMaintenance ?? u.preferences?.notifyMaintenance ?? true,
     };
     await this.usersRepo.save(u);
+    this.invalidateUserCache(userId);
     return this.getPreferences(userId);
   }
 
@@ -348,6 +366,7 @@ export class JwtAndPermissionsGuard implements CanActivate {
     @InjectRepository(UserEntity) private readonly usersRepo: Repository<UserEntity>,
     private readonly audit: AuditService,
     private readonly devices: DevicesService,
+    private readonly cache: AppCacheService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -371,7 +390,17 @@ export class JwtAndPermissionsGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or expired access token');
     }
 
-    const user = await this.usersRepo.findOne({ where: { id: payload.sub } });
+    const user = await this.cache.getOrSet(`auth:user:${payload.sub}`, 10_000, async () => {
+      const found = await this.usersRepo.findOne({ where: { id: payload.sub } });
+      if (!found) return null;
+      return {
+        id: found.id,
+        username: found.username,
+        fullName: found.fullName,
+        role: found.role,
+        status: found.status,
+      };
+    });
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('User account is not active');
     }
@@ -435,6 +464,7 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Public()
+  @Throttle({ default: { ttl: 60_000, limit: process.env.NODE_ENV === 'test' ? 1000 : 10 } })
   @Post('login')
   @HttpCode(200)
   login(
@@ -448,6 +478,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { ttl: 60_000, limit: process.env.NODE_ENV === 'test' ? 1000 : 20 } })
   @Post('refresh')
   @HttpCode(200)
   refresh(@Body() dto: RefreshDto, @ReqMeta() meta: RequestMeta) {

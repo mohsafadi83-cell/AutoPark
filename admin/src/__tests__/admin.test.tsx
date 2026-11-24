@@ -6,7 +6,7 @@ import { getFirstAccessibleRoute, hasAnyPermission, hasPermission } from '../con
 import { applyDocumentLanguage } from '../i18n';
 import '../i18n';
 import { MASKED_SECRET, sanitizeConfigPayload } from '../pages/IndustrialConfigPage';
-import { canCancelParkingRequest } from '../pages/ParkingPage';
+import { canCancelParkingRequest, sortTowerSpacesTopDown } from '../pages/ParkingPage';
 import { TAG_KEYS, type IndustrialConfig, type ParkingRequest, type TagDefinition, type User } from '../types/api';
 
 const makeUser = (overrides: Partial<User> = {}): User => ({
@@ -184,5 +184,14 @@ describe('Secret masking in IndustrialConfig form & RTL language switching', () 
     applyDocumentLanguage('en');
     expect(document.documentElement.dir).toBe('ltr');
     expect(document.documentElement.lang).toBe('en');
+  });
+
+  it('sorts tower bays top-to-bottom (P3 Top -> P2 Mid -> P1 Bottom) matching physical lift & KTP400 HMI', () => {
+    const sorted = sortTowerSpacesTopDown([
+      { spaceNumber: 'L11', level: 1 },
+      { spaceNumber: 'L13', level: 3 },
+      { spaceNumber: 'L12', level: 2 },
+    ]);
+    expect(sorted.map((s) => s.spaceNumber)).toEqual(['L13', 'L12', 'L11']);
   });
 });

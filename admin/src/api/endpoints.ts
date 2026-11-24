@@ -3,6 +3,8 @@ import type {
   Alarm,
   AuditLog,
   AuthResponse,
+  CacheFlushResponse,
+  CacheStatsSnapshot,
   ConfigTestResult,
   DashboardData,
   HistoryItem,
@@ -57,6 +59,8 @@ export const authApi = {
 
 export const systemApi = {
   health: () => get<{ status: string; mode: string; adapter: string; time: string }>('/health'),
+  cacheStats: () => get<CacheStatsSnapshot>('/health/cache'),
+  flushCache: () => post<CacheFlushResponse>('/health/cache/flush'),
   dashboard: () => get<DashboardData>('/dashboard'),
   status: () => get<SystemStatus>('/system/status'),
 };
@@ -64,7 +68,8 @@ export const systemApi = {
 export const parkingApi = {
   spaces: (q?: Query) => get<ParkingSpace[]>('/parking/spaces', q),
   space: (id: string) => get<ParkingSpace>(`/parking/spaces/${id}`),
-  park: (body: { vehicleId?: string; plateNumber?: string }) => post<ParkingRequest>('/parking/request', body),
+  park: (body: { vehicleId?: string; plateNumber?: string; targetSpaceNumber?: string }) =>
+    post<ParkingRequest>('/parking/request', body),
   retrieve: (body: { vehicleId?: string; plateNumber?: string }) => post<ParkingRequest>('/parking/retrieve', body),
   requests: (q?: Query) => get<Paginated<ParkingRequest>>('/parking/requests', q),
   request: (id: string) => get<ParkingRequest>(`/parking/requests/${id}`),
