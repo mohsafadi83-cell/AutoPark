@@ -1,5 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { QueryFailedError } from 'typeorm';
+import { ControllerError } from '../modules/industrial/industrial-controller.interface';
 
 /** Uniform error responses. Never leaks stack traces / SQL to clients. */
 @Catch()
@@ -11,6 +12,23 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const res = ctx.getResponse();
     const req = ctx.getRequest();
+
+    if (exception instanceof ControllerError) {
+      const codeMap: Record<string, number> = {
+        REJECTED: HttpStatus.FORBIDDEN,
+        NOT_CONFIGURED: HttpStatus.BAD_REQUEST,
+        NOT_CONNECTED: HttpStatus.SERVICE_UNAVAILABLE,
+        WRITE_FAILED: HttpStatus.BAD_GATEWAY,
+        TIMEOUT: HttpStatus.GATEWAY_TIMEOUT,
+      };
+      const status = codeMap[exception.code] ?? HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        statusCode: status,
+        error: HttpStatus[status],
+        code: exception.code,
+        message: exception.message,
+      });
+    }
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus();

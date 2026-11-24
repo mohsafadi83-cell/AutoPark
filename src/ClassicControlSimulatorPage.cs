@@ -118,6 +118,7 @@ namespace AutoPark
             else if (Mode == ClassicCircuitMode.FwdRevInterlock)
             {
                 // Forward / Reverse with strict electrical NC cross-interlock (KM2 NC -> KM1, KM1 NC -> KM2)
+                // Pressing opposing start button while running MUST be blocked and MUST NEVER plug-reverse without STOP!
                 if (PbStart1 && Km2)
                 {
                     InterlockBlocked = true;
@@ -128,24 +129,25 @@ namespace AutoPark
                     InterlockBlocked = true;
                     LastBlockReason = Loc.T("Blocked by KM1 NC Interlock — press STOP first!", "ممنوع بواسطة إنترلوك KM1 المغلق — اضغط إيقاف أولاً!");
                 }
-                if (PbStart1 && PbStart2)
+                if (PbStart1 && PbStart2 && !Km1 && !Km2)
                 {
                     InterlockBlocked = true;
                     LastBlockReason = Loc.T("Simultaneous FWD + REV blocked by interlock!", "تم منع الضغط المتزامن للأمام والخلف بواسطة الإنترلوك!");
                 }
 
-                bool nextKm1 = stopClosed && !LsTopOrFwd && !Km2 && !PbStart2 && (PbStart1 || Km1);
-                bool nextKm2 = stopClosed && !LsBtmOrRev && !nextKm1 && !PbStart1 && (PbStart2 || Km2);
+                bool nextKm1 = stopClosed && !LsTopOrFwd && !Km2 && (Km1 || (PbStart1 && !PbStart2));
+                bool nextKm2 = stopClosed && !LsBtmOrRev && !Km1 && !nextKm1 && (Km2 || (PbStart2 && !PbStart1));
                 Km1 = nextKm1;
                 Km2 = nextKm2;
                 Km3 = false;
                 Kt1Coil = false;
                 Kt1Done = false;
                 TimerElapsedSec = 0.0;
+                StarDeltaDeadElapsedSec = 0.0;
             }
             else if (Mode == ClassicCircuitMode.StarDeltaTimer)
             {
-                // Star-Delta Starter: KM1 (Main) + KT1 (On-Delay Timer) + KM2 (Star Y) -> KM3 (Delta D)
+                // Star-Delta Starter: KM1 (Main) + KT1 (On-Delay Timer) + KM2 (Star Y) -> 100ms dead-time -> KM3 (Delta D)
                 bool nextKm1 = stopClosed && (PbStart1 || Km1);
                 Km1 = nextKm1;
                 Kt1Coil = Km1;
@@ -168,12 +170,25 @@ namespace AutoPark
                 else
                 {
                     TimerElapsedSec = 0.0;
+                    StarDeltaDeadElapsedSec = 0.0;
                     Kt1Done = false;
                 }
 
-                // Electrical interlock between Star (KM2) and Delta (KM3)
+                // Electrical interlock with IEC open-transition dead-time pause between Star (KM2) and Delta (KM3)
                 bool nextKm2 = Km1 && !Kt1Done && !Km3;
-                bool nextKm3 = Km1 && Kt1Done && !nextKm2;
+                if (Km1 && Kt1Done && !nextKm2)
+                {
+                    if (StarDeltaDeadElapsedSec < StarDeltaDeadTimeSec)
+                    {
+                        StarDeltaDeadElapsedSec += dtSec;
+                    }
+                }
+                else
+                {
+                    StarDeltaDeadElapsedSec = 0.0;
+                }
+                bool deadTimeElapsed = StarDeltaDeadElapsedSec >= StarDeltaDeadTimeSec;
+                bool nextKm3 = Km1 && Kt1Done && !Km2 && !nextKm2 && deadTimeElapsed;
                 Km2 = nextKm2;
                 Km3 = nextKm3;
             }
@@ -645,8 +660,8 @@ namespace AutoPark
             int r4Y = r3Y + 84;
             int r5Y = Math.Min(botY - 26, r4Y + 72);
 
-            // Safety status badge
-            DrawTagPill(g, rightRail - 135, r1Y - 12, p5 ? "SAFETY CHAIN: OK" : "SAFETY OPEN!", p5 ? Theme.Ok : Theme.Err);
+            // Safety status badge neatly in top-right of Control Circuit header (zero overlap with STOP S0)
+            DrawTagPill(g, rightRail - 138, y - 34, p5 ? "SAFETY CHAIN: OK" : "SAFETY OPEN!", p5 ? Theme.Ok : Theme.Err);
 
             // Draw circuit-specific ladder rungs!
             int c1 = leftRail + (int)((rightRail - leftRail) * 0.24);
@@ -909,6 +924,8 @@ namespace AutoPark
         readonly Label _lblTelemetry;
         readonly Label _lblCoils;
         readonly TextBox _txtLog;
+        readonly ModernButton _btnLiveMirror;
+        bool _livePlcMirror = false;
 
         public ClassicControlSimulatorPage(MainForm shell)
         {
@@ -965,19 +982,46 @@ namespace AutoPark
             var btnReset = MakeBtn(Loc.T("Reset Sim", "تصفير المحاكاة"), Icons.Refresh, Theme.Surface, Theme.SurfaceHover, Theme.Ink, true);
             btnReset.Click += delegate
             {
+                _livePlcMirror = false;
+                _btnLiveMirror.Text = Loc.T("PLC Mirror: OFF", "مرآة PLC: متوقف");
+                _btnLiveMirror.BaseColor = Theme.Surface;
+                _btnLiveMirror.ForeColor = Theme.Ink;
                 _st.ResetAll();
                 AppendLog(Loc.T("Simulation reset to safe idle state.", "تمت إعادة تصفير المحاكاة إلى الوضع الآمن."));
                 RefreshControls();
             };
 
+            _btnLiveMirror = MakeBtn(Loc.T("PLC Mirror: OFF", "مرآة PLC: متوقف"), Icons.Plug, Theme.Surface, Theme.PrimarySoft, Theme.Ink, true);
+            _btnLiveMirror.Click += delegate
+            {
+                _livePlcMirror = !_livePlcMirror;
+                if (_livePlcMirror)
+                {
+                    if (_cboCircuit.SelectedIndex != (int)ClassicCircuitMode.AutoParkHydraulic)
+                        _cboCircuit.SelectedIndex = (int)ClassicCircuitMode.AutoParkHydraulic;
+                    _btnLiveMirror.Text = Loc.T("PLC Mirror: LIVE", "مرآة PLC: حي");
+                    _btnLiveMirror.BaseColor = Theme.Ok;
+                    _btnLiveMirror.ForeColor = Color.White;
+                    AppendLog(Loc.T("Live Read-Only S7-1200 Mirror ENABLED (zero PLC writes).", "تم تفعيل مرآة قراءة حية من S7-1200 (قراءة فقط بدون تحريك الماكنة)."));
+                }
+                else
+                {
+                    _btnLiveMirror.Text = Loc.T("PLC Mirror: OFF", "مرآة PLC: متوقف");
+                    _btnLiveMirror.BaseColor = Theme.Surface;
+                    _btnLiveMirror.ForeColor = Theme.Ink;
+                    AppendLog(Loc.T("Live PLC Mirror OFF — offline virtual simulation active.", "تم إيقاف مرآة الـ PLC — عودة للمحاكاة الافتراضية."));
+                }
+            };
+
             var btnExport = MakeBtn(Loc.T("Export Log", "تصدير السجل"), Icons.Download, Theme.PrimarySoft, Theme.BlueSoft, Theme.Primary, false);
             btnExport.Click += delegate { ExportSimLog(); };
 
-            topCard.Controls.Add(Theme.Holder(btnExport, endDock, 126, new Padding(6, 2, 0, 2)));
-            topCard.Controls.Add(Theme.Holder(btnReset, endDock, 126, new Padding(6, 2, 6, 2)));
-            topCard.Controls.Add(Theme.Holder(_numTimer, startDock, 68, new Padding(8, 8, 8, 4)));
+            topCard.Controls.Add(Theme.Holder(btnExport, endDock, 118, new Padding(4, 2, 0, 2)));
+            topCard.Controls.Add(Theme.Holder(btnReset, endDock, 114, new Padding(4, 2, 4, 2)));
+            topCard.Controls.Add(Theme.Holder(_btnLiveMirror, endDock, 146, new Padding(4, 2, 4, 2)));
+            topCard.Controls.Add(Theme.Holder(_numTimer, startDock, 62, new Padding(6, 8, 6, 4)));
             topCard.Controls.Add(lblTimer);
-            topCard.Controls.Add(Theme.Holder(_cboCircuit, startDock, 348, new Padding(6, 6, 10, 4)));
+            topCard.Controls.Add(Theme.Holder(_cboCircuit, startDock, 332, new Padding(6, 6, 8, 4)));
             topCard.Controls.Add(lblMode);
 
             // 2. Main Split Body: Left Interactive Schematic Canvas + Right Operator Panel
@@ -1150,6 +1194,16 @@ namespace AutoPark
             _simTimer.Tick += delegate
             {
                 if (IsDisposed || !Visible) return;
+                if (_livePlcMirror && _st.Mode == ClassicCircuitMode.AutoParkHydraulic)
+                {
+                    var s = ParkState.Instance.Sensors;
+                    _st.McbOn = s.LiveConnected;
+                    _st.EStopPressed = s.EmergencyPhysical || ParkState.Instance.EmergencyStop;
+                    _st.PhotocellBlocked = !s.PhotocellClear || s.ObstacleExist;
+                    _st.OverloadTrip = s.StopperFault || s.ErrorInPosition;
+                    int fl = s.CurrentFloor != null && s.CurrentFloor.Length > 0 ? s.CurrentFloor[0] : 1;
+                    _st.LiftPositionPct = fl >= 3 ? 100.0 : (fl == 2 ? 50.0 : 0.0);
+                }
                 _st.Step(0.05, AppendLog);
                 _canvas.AdvanceAnimation();
                 RefreshTelemetry();
@@ -1169,6 +1223,7 @@ namespace AutoPark
         Label SectionHeader(string text)
         {
             var l = Theme.Label(text, Theme.Bold(9.5f), Theme.Ink);
+            l.UseMnemonic = false;
             l.Dock = DockStyle.Top;
             l.Height = 26;
             l.Padding = new Padding(0, 6, 0, 2);
@@ -1213,9 +1268,16 @@ namespace AutoPark
 
         void WireMomentary(ModernButton btn, Action<bool> onState)
         {
-            btn.MouseDown += delegate { onState(true); RefreshControls(); };
+            btn.MouseDown += delegate (object s, MouseEventArgs e)
+            {
+                if (e.Button != MouseButtons.Left) return;
+                onState(true);
+                RefreshControls();
+            };
             btn.MouseUp += delegate { onState(false); RefreshControls(); };
             btn.MouseLeave += delegate { onState(false); RefreshControls(); };
+            btn.LostFocus += delegate { onState(false); RefreshControls(); };
+            btn.MouseCaptureChanged += delegate { if (!btn.Capture) { onState(false); RefreshControls(); } };
         }
 
         void AppendLog(string msg)
