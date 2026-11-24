@@ -45,23 +45,23 @@ jobs:
         uses: actions/deploy-pages@v4
 
   publish-release:
-    name: Publish AutoPark.apk & AutoPark.exe Release
+    name: Publish AutoPark.exe Release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Publish Latest Release with APK & Desktop EXE
+      - name: Publish Latest Release with Desktop EXE
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: AutoPark Latest Release (Server 46.185.128.165)
           body: |
             ### AutoPark v2.0 — Ready-to-Install Downloads
-            - **Android App**: `AutoPark.apk` (configured for `http://46.185.128.165:3000`)
+            - **Android App**: `AutoPark.apk` (built automatically by `build-mobile.yml` for `http://46.185.128.165:3000`)
+            - **iOS Unsigned IPA**: `AutoPark-iOS.ipa` (built automatically by `build-mobile.yml`)
             - **Windows Desktop**: `AutoPark.exe`
             - **iOS / Safari PWA**: https://mohsafadi83-cell.github.io/AutoPark/ (or `http://46.185.128.165:5174`)
           files: |
-            AutoPark.apk
             AutoPark.exe
           make_latest: true
         env:
