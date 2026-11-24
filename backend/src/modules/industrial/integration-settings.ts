@@ -130,7 +130,6 @@ export const DEFAULT_VERIFIED_S7_TAG_MAP: Record<string, TagDefinition> = {
   auto_mode_tag: { address: 'DB1,X0.3', dataType: 'BOOL', access: 'RW', description: 'ParkIO_Data.Auto_DB' },
   machine_state_tag: { address: 'DB1,X0.3', dataType: 'BOOL', access: 'R', description: 'ParkIO_Data.Auto_DB (Active Auto State)' },
   auto_ok_tag: { address: 'DB1,X0.4', dataType: 'BOOL', access: 'R', description: 'ParkIO_Data.AutoOK_DB' },
-  system_ready_tag: { address: 'DB1,X0.4', dataType: 'BOOL', access: 'R', description: 'ParkIO_Data.AutoOK_DB (System Ready)' },
   manual_mode_tag: { address: 'DB1,X0.5', dataType: 'BOOL', access: 'RW', description: 'ParkIO_Data.Manual_DB' },
   manual_ok_tag: { address: 'DB1,X0.6', dataType: 'BOOL', access: 'R', description: 'ParkIO_Data.ManualOK_DB' },
   pcell_inside_db_tag: { address: 'DB1,X0.7', dataType: 'BOOL', access: 'R', description: 'ParkIO_Data.PCELL_inside_DB' },
