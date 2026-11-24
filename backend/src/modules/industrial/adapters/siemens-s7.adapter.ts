@@ -633,36 +633,41 @@ export class SiemensS7Adapter implements IndustrialController {
       };
     }
 
+    // Ensure nodes7 always receives a native boolean for S7 bit addresses (e.g., M0.4, DB1,X2.2)
+    const isBitAddr = /^([IQM]\d+\.\d+|DB\d+,X\d+\.\d+)$/i.test(cleanAddr);
+    const normalizedValue: boolean | number = isBitAddr ? Boolean(value) : value;
+
     // Hardware-safe Dry-Run / Simulation mode (zero socket traffic, zero physical movement)
     if (this.dryRunMode) {
       this.dryRunWrites.push({
         time: new Date().toISOString(),
         tagKey,
         address: cleanAddr,
-        value,
+        value: normalizedValue,
         pulseMs,
       });
       if (tagKey) {
-        this.lastValues[tagKey] = value;
+        this.lastValues[tagKey] = normalizedValue;
       }
-      this.lastValues[cleanAddr] = value;
-      if (pulseMs && pulseMs > 0 && typeof value === 'boolean') {
+      this.lastValues[cleanAddr] = normalizedValue;
+      if (pulseMs && pulseMs > 0 && typeof normalizedValue === 'boolean') {
         this.dryRunWrites.push({
           time: new Date().toISOString(),
           tagKey,
           address: cleanAddr,
-          value: !value,
+          value: !normalizedValue,
           pulseMs: 0,
         });
-        if (tagKey) this.lastValues[tagKey] = !value;
-        this.lastValues[cleanAddr] = !value;
+        if (tagKey) this.lastValues[tagKey] = !normalizedValue;
+        this.lastValues[cleanAddr] = !normalizedValue;
       }
       this.decodePlcAlarms(this.lastValues);
-      return { ok: true, address: cleanAddr, value, note: 'DRY_RUN_SIMULATED' };
+      return { ok: true, address: cleanAddr, value: normalizedValue, note: 'DRY_RUN_SIMULATED' };
     }
 
     const writeOnPersistentOrFallback = (val: boolean | number) =>
       new Promise<void>((resolve, reject) => {
+        const coercedVal: boolean | number = isBitAddr ? Boolean(val) : val;
         // Reuse persistent S7-1200 ISO-on-TCP connection when available (prevents CPU 1212C TCP slot exhaustion!)
         if (this.conn && this.connected) {
           const itemKey = tagKey && this.translationMap[tagKey] === cleanAddr
@@ -683,7 +688,7 @@ export class SiemensS7Adapter implements IndustrialController {
               reject(new ControllerError(`S7-1200 write timeout on ${cleanAddr}`, 'WRITE_FAILED'));
             }
           }, 3500);
-          this.conn.writeItems([itemKey], [val], (wErr?: unknown) => {
+          this.conn.writeItems([itemKey], [coercedVal], (wErr?: unknown) => {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
@@ -704,7 +709,7 @@ export class SiemensS7Adapter implements IndustrialController {
             if (err) return reject(new ControllerError(`S7-1200 connect error: ${String(err)}`, 'NOT_CONNECTED'));
             c.setTranslationCB(() => cleanAddr);
             c.addItems(['TARGET']);
-            c.writeItems(['TARGET'], [val], (wErr?: unknown) => {
+            c.writeItems(['TARGET'], [coercedVal], (wErr?: unknown) => {
               c.dropConnection(() => {
                 if (wErr) return reject(new ControllerError(`S7-1200 write error on ${cleanAddr}: ${String(wErr)}`, 'WRITE_FAILED'));
                 resolve();
@@ -716,10 +721,10 @@ export class SiemensS7Adapter implements IndustrialController {
 
     // Serialize all S7 writes through a FIFO chain so concurrent button clicks never collide on TCP
     const execWrite = async () => {
-      await writeOnPersistentOrFallback(value);
-      if (pulseMs && pulseMs > 0 && typeof value === 'boolean') {
+      await writeOnPersistentOrFallback(normalizedValue);
+      if (pulseMs && pulseMs > 0 && typeof normalizedValue === 'boolean') {
         await new Promise((r) => setTimeout(r, Math.min(3000, pulseMs)));
-        await writeOnPersistentOrFallback(!value);
+        await writeOnPersistentOrFallback(!normalizedValue);
       }
     };
 

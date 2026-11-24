@@ -1338,6 +1338,23 @@ namespace AutoPark
             }
         }
 
+        public string SendPlcWriteBool(string address, bool value, int pulseMs)
+        {
+            if (string.IsNullOrEmpty(BackendToken)) return "";
+            try
+            {
+                string valLit = value ? "true" : "false";
+                string body = pulseMs > 0
+                    ? "{\"address\":\"" + EscapeJson(address) + "\",\"value\":" + valLit + ",\"pulseMs\":" + pulseMs + "}"
+                    : "{\"address\":\"" + EscapeJson(address) + "\",\"value\":" + valLit + "}";
+                return HttpSend("POST", ApiBaseUrl + "/industrial/s7/write", body);
+            }
+            catch (Exception ex)
+            {
+                return "ERR:" + ex.Message;
+            }
+        }
+
         public void RecordLocalAudit(string type, string target, string details, string userFullName)
         {
             Commands.Insert(0, new CommandRecord

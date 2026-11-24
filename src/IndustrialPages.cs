@@ -759,14 +759,15 @@ namespace AutoPark
                 ReleaseMomentary(_activeMomentaryKey, Loc.T("Switching lane", "تبديل مسار"));
 
             _activeMomentaryKey = controlKey;
-            _lblStatus.Text = Loc.T("🟡 Momentary active (Hold): ", "🟡 تشغيل لحظي نشط (Momentary): ") + label + " (" + controlKey + " = 1 + M0.4 = 1)";
+            _lblStatus.Text = Loc.T("🟡 Momentary active (Hold): ", "🟡 تشغيل لحظي نشط (Momentary): ") + label + " (" + controlKey + " = 1 + Accept_action_manual M0.4 = 1)";
             _lblStatus.ForeColor = Theme.Amber;
 
             string keyCopy = controlKey;
             ThreadPool.QueueUserWorkItem(delegate
             {
                 ParkState.Instance.SendManualControl(keyCopy, true);
-                ParkState.Instance.SendPlcWrite("M0.4", 1, 0);
+                ParkState.Instance.SendPlcWriteBool("M0.3", true, 0);
+                ParkState.Instance.SendPlcWriteBool("M0.4", true, 0);
             });
         }
 
@@ -775,17 +776,18 @@ namespace AutoPark
             if (_activeMomentaryKey != controlKey && controlKey != null) return;
             _activeMomentaryKey = null;
             bool keepAcceptHigh = HasAnyActiveStopper();
-            _lblStatus.Text = Loc.T("🟢 Momentary released (ResetBit = 0): ", "🟢 تم إفلات الزر اللحظي (ResetBit = 0): ") + label + " (M0.4 = " + (keepAcceptHigh ? "1" : "0") + ")";
+            _lblStatus.Text = Loc.T("🟢 Momentary released (ResetBit = 0): ", "🟢 تم إفلات الزر اللحظي (ResetBit = 0): ") + label + " (Accept_action_manual M0.4 = " + (keepAcceptHigh ? "1" : "0") + ")";
             _lblStatus.ForeColor = Theme.Ok;
 
             string keyCopy = controlKey;
             string lblCopy = label;
-            int m04Val = keepAcceptHigh ? 1 : 0;
+            bool keepHigh = keepAcceptHigh;
             ParkState.Instance.RecordLocalAudit("MANUAL_MOMENTARY", keyCopy, lblCopy, Loc.UserDisplay(_shell.CurrentUser));
             ThreadPool.QueueUserWorkItem(delegate
             {
                 ParkState.Instance.SendManualControl(keyCopy, false);
-                ParkState.Instance.SendPlcWrite("M0.4", m04Val, 0);
+                ParkState.Instance.SendPlcWriteBool("M0.4", keepHigh, 0);
+                ParkState.Instance.SendPlcWriteBool("M0.3", keepHigh, 0);
             });
         }
 
@@ -922,20 +924,23 @@ namespace AutoPark
             string lblCopy = label;
             bool stateCopy = active;
             bool sendAcceptManual = isStopper;
-            bool acceptStateCopy = acceptManualState;
+            bool acceptStateCopy = acceptManualState || (_activeMomentaryKey != null);
             ParkState.Instance.RecordLocalAudit(stateCopy ? "MANUAL_TOGGLE_ON" : "MANUAL_TOGGLE_OFF", keyCopy, lblCopy, Loc.UserDisplay(_shell.CurrentUser));
             ThreadPool.QueueUserWorkItem(delegate
             {
                 ParkState.Instance.SendManualControl(keyCopy, stateCopy);
                 if (sendAcceptManual)
-                    ParkState.Instance.SendPlcWrite("M0.4", acceptStateCopy ? 1 : 0, 0);
+                {
+                    ParkState.Instance.SendPlcWriteBool("M0.3", acceptStateCopy, 0);
+                    ParkState.Instance.SendPlcWriteBool("M0.4", acceptStateCopy, 0);
+                }
             });
         }
 
         void ReleaseAllOutputs(string reason)
         {
             bool allowWallWasOn = GetToggleState("allow_wall_tag");
-            bool stopperWasOn = HasAnyActiveStopper();
+            bool stopperOrLaneWasOn = HasAnyActiveStopper() || (_activeMomentaryKey != null);
             _activeMomentaryKey = null;
             ClearAllToggleVisuals();
             _lblStatus.Text = "🛑 " + reason;
@@ -943,12 +948,15 @@ namespace AutoPark
             ParkState.Instance.RecordLocalAudit("MANUAL_STOP_ALL", "ALL_OUTPUTS", reason, Loc.UserDisplay(_shell.CurrentUser));
             ThreadPool.QueueUserWorkItem(delegate
             {
-                // Atomic single-command release: clears all manual actuator bits + manual_action_tag (%M0.3) + accept_manual_tag (%M0.4)
+                // Atomic single-command release: clears all manual actuator bits + manual_action (%M0.3) + Accept_action_manual (%M0.4)
                 ParkState.Instance.SendManualControl("stop_all_manual", false);
                 if (allowWallWasOn)
                     ParkState.Instance.SendManualControl("allow_wall_tag", false);
-                if (stopperWasOn)
-                    ParkState.Instance.SendPlcWrite("M0.4", 0, 0);
+                if (stopperOrLaneWasOn)
+                {
+                    ParkState.Instance.SendPlcWriteBool("M0.4", false, 0);
+                    ParkState.Instance.SendPlcWriteBool("M0.3", false, 0);
+                }
             });
         }
 
