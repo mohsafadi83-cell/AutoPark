@@ -143,14 +143,14 @@ namespace AutoPark
             var safetyGrid = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 148,
+                Height = 168,
                 ColumnCount = 4,
                 RowCount = 2,
-                Padding = new Padding(0, 4, 0, 6)
+                Padding = new Padding(0, 6, 0, 8)
             };
             for (int i = 0; i < 4; i++) safetyGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
-            safetyGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
-            safetyGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
+            safetyGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 76f));
+            safetyGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 76f));
 
             _lblPhotocell = MakeSafetyBadge(safetyGrid, 0, 0, Loc.T("Photocell Inside (DB1,X0.7)", "حساس داخلي (DB1,X0.7)"));
             _lblPhotocellOut = MakeSafetyBadge(safetyGrid, 1, 0, Loc.T("Photocell Outside (DB1,X1.0)", "حساس خارجي (DB1,X1.0)"));
@@ -161,63 +161,70 @@ namespace AutoPark
             _lblStopper = MakeSafetyBadge(safetyGrid, 2, 1, Loc.T("Mechanical Stopper (M50.4)", "حالة Stopper (M50.4)"));
             _lblLiftPos = MakeSafetyBadge(safetyGrid, 3, 1, Loc.T("Lift Position (M50.3 / M50.5)", "تموضع المصعد (M50.3/5)"));
 
-            // Live Physical Digital Inputs Strip (I0.0 – I3.7 = all 32 hardware sensor inputs directly from PLC IB0..IB3)
-            var rawIoCard = new Card { Dock = DockStyle.Top, Height = 150, Padding = new Padding(14, 8, 14, 8), Margin = new Padding(0, 0, 0, 8) };
+            // Live Physical Digital Inputs Strip (4 rows × 8 columns = I0.0–I0.7, I1.0–I1.7, I2.0–I2.7, I3.0–I3.7)
+            var rawIoCard = new Card { Dock = DockStyle.Top, Height = 236, Padding = new Padding(14, 10, 14, 10) };
             _lblRawIoLine = Theme.Label(
                 Loc.T("Live Physical PLC Digital Inputs (I0.0–I3.7) — IB0=— IB1=— IB2=— IB3=—",
                       "مداخل الحساسات الفيزيائية الحية من الـ PLC (I0.0–I3.7) — IB0=— IB1=— IB2=— IB3=—"),
-                Theme.Bold(9.2f), Theme.Primary);
+                Theme.Bold(9.5f), Theme.Primary);
             _lblRawIoLine.UseMnemonic = false;
             _lblRawIoLine.Dock = DockStyle.Top;
-            _lblRawIoLine.Height = 20;
+            _lblRawIoLine.Height = 24;
 
-            var rawGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 16, RowCount = 2, RightToLeft = RightToLeft.No };
-            for (int c = 0; c < 16; c++) rawGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 16f));
-            rawGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
-            rawGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
+            var rawGrid = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 8,
+                RowCount = 4,
+                Padding = new Padding(0, 6, 0, 0),
+                RightToLeft = RightToLeft.No
+            };
+            for (int c = 0; c < 8; c++) rawGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 12.5f));
+            for (int r = 0; r < 4; r++) rawGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 46f));
             for (int i = 0; i < 32; i++)
             {
                 string nm = InputName(i);
                 var led = new Label
                 {
                     Text = "I" + (i / 8) + "." + (i % 8) + "\n" + nm,
-                    Font = new Font("Segoe UI", 7f, FontStyle.Bold),
+                    Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                     TextAlign = ContentAlignment.MiddleCenter,
                     Dock = DockStyle.Fill,
-                    Margin = new Padding(1),
+                    Margin = new Padding(3, 3, 3, 3),
                     BackColor = Theme.Back,
                     ForeColor = Theme.Muted,
                     BorderStyle = BorderStyle.FixedSingle,
                     UseMnemonic = false
                 };
                 _rawInLeds[i] = led;
-                rawGrid.Controls.Add(led, i % 16, i / 16);
+                rawGrid.Controls.Add(led, i % 8, i / 8);
             }
             rawIoCard.Controls.Add(rawGrid);
             rawIoCard.Controls.Add(_lblRawIoLine);
 
-            // Main Limit Switch Matrix Card
-            var matrixCard = new Card { Dock = DockStyle.Fill, Padding = new Padding(18, 12, 18, 12) };
+            // Main Limit Switch Matrix Card (explicit height + absolute row heights so rows never overlap)
+            var matrixCard = new Card { Dock = DockStyle.Top, Height = 398, Padding = new Padding(18, 12, 18, 12) };
             var matrixTitle = Theme.Label(
                 Loc.T("Floor Limit Switches Matrix (TOP=P3 / MID=P2 / BTM=P1) & Mechanical Protection (MG_PROT):",
                       "مصفوفة حساسات حدود الطوابق (Limit Switches: TOP=P3 / MID=P2 / BTM=P1) والحماية الميكانيكية (MG_PROT):"),
                 Theme.Bold(10.5f), Theme.Ink);
             matrixTitle.UseMnemonic = false;
             matrixTitle.Dock = DockStyle.Top;
-            matrixTitle.Height = 28;
+            matrixTitle.Height = 30;
 
             var tbl = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 5,
                 RowCount = 6,
-                Padding = new Padding(4, 6, 4, 6)
+                Padding = new Padding(4, 8, 4, 8)
             };
-            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220f));
+            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 235f));
             for (int c = 1; c <= 4; c++)
                 tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
-            for (int r = 0; r < 6; r++)
-                tbl.RowStyles.Add(new RowStyle(SizeType.Percent, 16.66f));
+            tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
+            for (int r = 1; r < 6; r++)
+                tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 52f));
 
             tbl.Controls.Add(MakeHeaderCell(Loc.T("Sensor / Floor", "الحساس / الطابق")), 0, 0);
             for (int lane = 1; lane <= 4; lane++)
@@ -246,14 +253,21 @@ namespace AutoPark
 
             _lblAlarmRegs = Theme.Label("Alarm Word: 0 | Alarm Section: 0", Theme.F(9.5f), Theme.Muted);
             _lblAlarmRegs.Dock = DockStyle.Bottom;
-            _lblAlarmRegs.Height = 26;
+            _lblAlarmRegs.Height = 28;
 
             matrixCard.Controls.Add(tbl);
             matrixCard.Controls.Add(matrixTitle);
             matrixCard.Controls.Add(_lblAlarmRegs);
 
+            var gap1 = new Panel { Dock = DockStyle.Top, Height = 10, BackColor = Color.Transparent };
+            var gap2 = new Panel { Dock = DockStyle.Top, Height = 10, BackColor = Color.Transparent };
+            var gapBottom = new Panel { Dock = DockStyle.Top, Height = 16, BackColor = Color.Transparent };
+
+            Controls.Add(gapBottom);
             Controls.Add(matrixCard);
+            Controls.Add(gap2);
             Controls.Add(rawIoCard);
+            Controls.Add(gap1);
             Controls.Add(safetyGrid);
             Controls.Add(_maintPanel);
             Controls.Add(topBar);
@@ -302,11 +316,11 @@ namespace AutoPark
 
         Label MakeSafetyBadge(TableLayoutPanel parent, int col, int row, string titleText)
         {
-            var card = new Card { Dock = DockStyle.Fill, Margin = new Padding(3), Padding = new Padding(8, 5, 8, 5) };
+            var card = new Card { Dock = DockStyle.Fill, Margin = new Padding(4, 4, 4, 4), Padding = new Padding(10, 6, 10, 6) };
             var t = Theme.Label(titleText, Theme.Semi(8.4f), Theme.Muted);
             t.UseMnemonic = false;
             t.Dock = DockStyle.Top;
-            t.Height = 18;
+            t.Height = 20;
             var v = Theme.Label("—", Theme.Bold(9.5f), Theme.Ok);
             v.UseMnemonic = false;
             v.Dock = DockStyle.Fill;
@@ -322,7 +336,7 @@ namespace AutoPark
             l.Dock = DockStyle.Fill;
             l.TextAlign = ContentAlignment.MiddleCenter;
             l.BackColor = Theme.PrimarySoft;
-            l.Margin = new Padding(3);
+            l.Margin = new Padding(4, 4, 4, 4);
             return l;
         }
 
@@ -333,7 +347,7 @@ namespace AutoPark
             l.TextAlign = Theme.AlignStart;
             l.Padding = new Padding(8, 0, 8, 0);
             l.BackColor = Theme.Back;
-            l.Margin = new Padding(3);
+            l.Margin = new Padding(4, 6, 4, 6);
             return l;
         }
 
@@ -345,7 +359,7 @@ namespace AutoPark
                 Font = Theme.Bold(9.5f),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Dock = DockStyle.Fill,
-                Margin = new Padding(4),
+                Margin = new Padding(4, 6, 4, 6),
                 BackColor = Theme.Back,
                 ForeColor = Theme.Muted
             };
@@ -505,6 +519,7 @@ namespace AutoPark
         readonly Panel _controlsContainer;
         readonly Dictionary<string, bool> _toggleStates = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, ToggleBtnInfo> _toggleButtons = new Dictionary<string, ToggleBtnInfo>(StringComparer.OrdinalIgnoreCase);
+        string _activeMomentaryKey = null;
         bool _manualEnabled = false;
 
         public ManualMaintenancePage(MainForm shell)
@@ -594,9 +609,9 @@ namespace AutoPark
 
             var holdCard = new Card { Dock = DockStyle.Fill, Padding = new Padding(16), Margin = new Padding(6) };
             var holdTitle = Theme.Label(
-                Loc.T("Direct Manual Controls (Toggle — Click ON / Click OFF):",
-                      "التحكم اليدوي المباشر (تبديل Toggle — اضغط للتشغيل واضغط مجدداً للإيقاف):"),
-                Theme.Bold(10.5f), Theme.Primary);
+                Loc.T("Direct Manual Controls (Rows 1–3 Toggle | Stoppers S1–S4 also toggle M0.4 | Row 4 Lanes L1–L4 Momentary):",
+                      "التحكم اليدوي المباشر (الصفوف 1–3 تبديل Toggle | Stoppers S1–S4 تبدّل أيضاً M0.4 | الصف السفلي L1–L4 لحظي Momentary):"),
+                Theme.Bold(10.0f), Theme.Primary);
             holdTitle.Dock = DockStyle.Top;
             holdTitle.Height = 28;
 
@@ -625,10 +640,11 @@ namespace AutoPark
             holdGrid.Controls.Add(MakeToggleButton("🔒 Stopper S3", "man_s3_tag", Color.FromArgb(15, 118, 110)), 2, 2);
             holdGrid.Controls.Add(MakeToggleButton("🔒 Stopper S4", "man_s4_tag", Color.FromArgb(15, 118, 110)), 3, 2);
 
-            holdGrid.Controls.Add(MakeToggleButton(Loc.T("🚗 Lane L1", "🚗 المسار L1"), "man_l1_tag", Color.FromArgb(51, 65, 85)), 0, 3);
-            holdGrid.Controls.Add(MakeToggleButton(Loc.T("🚗 Lane L2 (Safe)", "🚗 المسار L2 (آمن)"), "man_l2_tag", Color.FromArgb(51, 65, 85)), 1, 3);
-            holdGrid.Controls.Add(MakeToggleButton(Loc.T("🚗 Lane L3", "🚗 المسار L3"), "man_l3_tag", Color.FromArgb(51, 65, 85)), 2, 3);
-            holdGrid.Controls.Add(MakeToggleButton(Loc.T("🚗 Lane L4", "🚗 المسار L4"), "man_l4_tag", Color.FromArgb(51, 65, 85)), 3, 3);
+            // Lower row (Lanes L1..L4): Momentary (Press & Hold — auto-releases on MouseUp/Leave/LostFocus)
+            holdGrid.Controls.Add(MakeMomentaryButton(Loc.T("🚗 Lane L1", "🚗 المسار L1"), "man_l1_tag", Color.FromArgb(51, 65, 85)), 0, 3);
+            holdGrid.Controls.Add(MakeMomentaryButton(Loc.T("🚗 Lane L2 (Safe)", "🚗 المسار L2 (آمن)"), "man_l2_tag", Color.FromArgb(51, 65, 85)), 1, 3);
+            holdGrid.Controls.Add(MakeMomentaryButton(Loc.T("🚗 Lane L3", "🚗 المسار L3"), "man_l3_tag", Color.FromArgb(51, 65, 85)), 2, 3);
+            holdGrid.Controls.Add(MakeMomentaryButton(Loc.T("🚗 Lane L4", "🚗 المسار L4"), "man_l4_tag", Color.FromArgb(51, 65, 85)), 3, 3);
 
             holdCard.Controls.Add(holdGrid);
             holdCard.Controls.Add(holdTitle);
@@ -697,10 +713,92 @@ namespace AutoPark
 
             Disposed += delegate
             {
+                if (_activeMomentaryKey != null)
+                    ReleaseMomentary(_activeMomentaryKey, Loc.T("Maintenance screen closed", "إغلاق شاشة الصيانة"));
                 if (HasAnyActiveToggle())
                     ReleaseAllOutputs(Loc.T("Maintenance screen closed", "إغلاق شاشة الصيانة"));
                 if (_manualEnabled) SetManualMode(false);
             };
+        }
+
+        ModernButton MakeMomentaryButton(string text, string controlKey, Color baseCol)
+        {
+            var btn = new ModernButton
+            {
+                Text = text,
+                BaseColor = baseCol,
+                HoverColor = ControlPaint.Dark(baseCol, 0.08f),
+                PressColor = Theme.Amber,
+                ForeColor = Color.White,
+                Dock = DockStyle.Fill,
+                Margin = new Padding(5)
+            };
+
+            string keyCopy = controlKey;
+            string textCopy = text;
+            btn.MouseDown += delegate (object s, MouseEventArgs e)
+            {
+                if (e.Button != MouseButtons.Left || !_manualEnabled) return;
+                if (ParkState.Instance.EmergencyStop)
+                {
+                    _lblStatus.Text = Loc.T("🔴 Manual operation blocked while Emergency Stop is active!", "🔴 ممنوع التشغيل اليدوي أثناء تفعيل إيقاف الطوارئ!");
+                    _lblStatus.ForeColor = Theme.Err;
+                    return;
+                }
+                StartMomentary(keyCopy, textCopy);
+            };
+            btn.MouseUp += delegate { ReleaseMomentary(keyCopy, textCopy); };
+            btn.MouseLeave += delegate { if (_activeMomentaryKey == keyCopy) ReleaseMomentary(keyCopy, textCopy + Loc.T(" (pointer left)", " (خروج المؤشر)")); };
+            btn.LostFocus += delegate { if (_activeMomentaryKey == keyCopy) ReleaseMomentary(keyCopy, textCopy + Loc.T(" (focus lost)", " (فقدان التركيز)")); };
+            return btn;
+        }
+
+        void StartMomentary(string controlKey, string label)
+        {
+            if (_activeMomentaryKey != null && _activeMomentaryKey != controlKey)
+                ReleaseMomentary(_activeMomentaryKey, Loc.T("Switching lane", "تبديل مسار"));
+
+            _activeMomentaryKey = controlKey;
+            _lblStatus.Text = Loc.T("🟡 Momentary active (Hold): ", "🟡 تشغيل لحظي نشط (Momentary): ") + label + " (" + controlKey + " = 1)";
+            _lblStatus.ForeColor = Theme.Amber;
+
+            string keyCopy = controlKey;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                ParkState.Instance.SendManualControl(keyCopy, true);
+            });
+        }
+
+        void ReleaseMomentary(string controlKey, string label)
+        {
+            if (_activeMomentaryKey != controlKey && controlKey != null) return;
+            _activeMomentaryKey = null;
+            _lblStatus.Text = Loc.T("🟢 Momentary released (ResetBit = 0): ", "🟢 تم إفلات الزر اللحظي (ResetBit = 0): ") + label;
+            _lblStatus.ForeColor = Theme.Ok;
+
+            string keyCopy = controlKey;
+            string lblCopy = label;
+            ParkState.Instance.RecordLocalAudit("MANUAL_MOMENTARY", keyCopy, lblCopy, Loc.UserDisplay(_shell.CurrentUser));
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                ParkState.Instance.SendManualControl(keyCopy, false);
+            });
+        }
+
+        static bool IsStopperKey(string controlKey)
+        {
+            return string.Equals(controlKey, "man_s1_tag", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(controlKey, "man_s2_tag", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(controlKey, "man_s3_tag", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(controlKey, "man_s4_tag", StringComparison.OrdinalIgnoreCase);
+        }
+
+        bool HasAnyActiveStopper()
+        {
+            return GetToggleState("man_s1_tag")
+                || GetToggleState("man_s2_tag")
+                || GetToggleState("man_s3_tag")
+                || GetToggleState("man_s4_tag");
         }
 
         ModernButton MakeToggleButton(string text, string controlKey, Color baseCol)
@@ -800,41 +898,53 @@ namespace AutoPark
             }
 
             UpdateToggleVisual(controlKey, active);
+            bool isStopper = IsStopperKey(controlKey);
+            bool acceptManualState = isStopper && HasAnyActiveStopper();
 
             if (active)
             {
-                _lblStatus.Text = Loc.T("🟢 Toggled ON (SetBit = 1): ", "🟢 تم التشغيل (Toggle ON = 1): ") + label + " (" + controlKey + ")";
+                string extra = isStopper ? " + Accept_action_manual (M0.4 = 1)" : "";
+                _lblStatus.Text = Loc.T("🟢 Toggled ON (SetBit = 1): ", "🟢 تم التشغيل (Toggle ON = 1): ") + label + " (" + controlKey + ")" + extra;
                 _lblStatus.ForeColor = Theme.Ok;
             }
             else
             {
-                _lblStatus.Text = Loc.T("⚪ Toggled OFF (ResetBit = 0): ", "⚪ تم الإيقاف (Toggle OFF = 0): ") + label + " (" + controlKey + ")";
+                string extra = isStopper ? (" + Accept_action_manual (M0.4 = " + (acceptManualState ? "1" : "0") + ")") : "";
+                _lblStatus.Text = Loc.T("⚪ Toggled OFF (ResetBit = 0): ", "⚪ تم الإيقاف (Toggle OFF = 0): ") + label + " (" + controlKey + ")" + extra;
                 _lblStatus.ForeColor = Theme.Ink;
             }
 
             string keyCopy = controlKey;
             string lblCopy = label;
             bool stateCopy = active;
+            bool sendAcceptManual = isStopper;
+            bool acceptStateCopy = acceptManualState;
             ParkState.Instance.RecordLocalAudit(stateCopy ? "MANUAL_TOGGLE_ON" : "MANUAL_TOGGLE_OFF", keyCopy, lblCopy, Loc.UserDisplay(_shell.CurrentUser));
             ThreadPool.QueueUserWorkItem(delegate
             {
                 ParkState.Instance.SendManualControl(keyCopy, stateCopy);
+                if (sendAcceptManual)
+                    ParkState.Instance.SendPlcWrite("M0.4", acceptStateCopy ? 1 : 0, 0);
             });
         }
 
         void ReleaseAllOutputs(string reason)
         {
             bool allowWallWasOn = GetToggleState("allow_wall_tag");
+            bool stopperWasOn = HasAnyActiveStopper();
+            _activeMomentaryKey = null;
             ClearAllToggleVisuals();
             _lblStatus.Text = "🛑 " + reason;
             _lblStatus.ForeColor = Theme.Err;
             ParkState.Instance.RecordLocalAudit("MANUAL_STOP_ALL", "ALL_OUTPUTS", reason, Loc.UserDisplay(_shell.CurrentUser));
             ThreadPool.QueueUserWorkItem(delegate
             {
-                // Atomic single-command release: clears all manual actuator bits + manual_action_tag (%M0.3)
+                // Atomic single-command release: clears all manual actuator bits + manual_action_tag (%M0.3) + accept_manual_tag (%M0.4)
                 ParkState.Instance.SendManualControl("stop_all_manual", false);
                 if (allowWallWasOn)
                     ParkState.Instance.SendManualControl("allow_wall_tag", false);
+                if (stopperWasOn)
+                    ParkState.Instance.SendPlcWrite("M0.4", 0, 0);
             });
         }
 

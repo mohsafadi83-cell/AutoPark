@@ -173,7 +173,7 @@ export const DEFAULT_VERIFIED_S7_TAG_MAP: Record<string, TagDefinition> = {
   // ─── Memories (%M — verified from PLCTags_(1).xlsx) ───
   manual_trig_tag: { address: 'M0.0', dataType: 'BOOL', access: 'R', description: 'Manual_TRIG' },
   manual_action_tag: { address: 'M0.3', dataType: 'BOOL', access: 'RW', description: 'manual_action (required for Stoppers S1-S4 & Lanes L1-L4)' },
-  accept_manual_tag: { address: 'M0.4', dataType: 'BOOL', access: 'R', description: 'Accept_action_manual' },
+  accept_manual_tag: { address: 'M0.4', dataType: 'BOOL', access: 'RW', description: 'Accept_action_manual' },
   reset_m_tag: { address: 'M0.5', dataType: 'BOOL', access: 'RW', description: 'Reset (%M0.5)' },
   fault_signal_tag: { address: 'M1.0', dataType: 'BOOL', access: 'R', description: 'Fault_Signal' },
   auto_signal_tag: { address: 'M1.1', dataType: 'BOOL', access: 'R', description: 'Auto_Signal' },

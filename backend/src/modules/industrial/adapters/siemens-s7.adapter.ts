@@ -130,6 +130,7 @@ export class SiemensS7Adapter implements IndustrialController {
   private softEmergencyDuringMove = false;
   private softManualMode = false;
   private activeManualActionKeys = new Set<string>();
+  private activeStopperKeys = new Set<string>();
   private softLaneFloor: Record<number, number> = { 1: 1, 2: 1, 3: 1, 4: 1 }; // Default at P1 (bottom)
 
   private static readonly BASE_DIAG_TAGS: Record<string, string> = {
@@ -809,7 +810,7 @@ export class SiemensS7Adapter implements IndustrialController {
       'man_up_tag', 'man_down_tag',
       'man_s1_tag', 'man_s2_tag', 'man_s3_tag', 'man_s4_tag',
       'man_l1_tag', 'man_l2_tag', 'man_l3_tag', 'man_l4_tag',
-      'allow_wall_tag', 'maintenance_reset_tag', 'siren_silencer_tag', 'obstacle_reset_tag',
+      'allow_wall_tag', 'accept_manual_tag', 'maintenance_reset_tag', 'siren_silencer_tag', 'obstacle_reset_tag',
       'stop_all_manual',
       'spot_L11_tag', 'spot_L12_tag', 'spot_L13_tag',
       'spot_L21_tag', 'spot_L22_tag', 'spot_L23_tag',
@@ -822,11 +823,12 @@ export class SiemensS7Adapter implements IndustrialController {
 
     if (controlKey === 'stop_all_manual') {
       this.activeManualActionKeys.clear();
+      this.activeStopperKeys.clear();
       const releaseKeys = [
         'man_pump_tag', 'man_wall_tag', 'man_up_tag', 'man_down_tag', 'man_cutoff_tag', 'allow_wall_tag',
         'man_l1_tag', 'man_l2_tag', 'man_l3_tag', 'man_l4_tag',
         'man_s1_tag', 'man_s2_tag', 'man_s3_tag', 'man_s4_tag',
-        'manual_action_tag',
+        'manual_action_tag', 'accept_manual_tag',
       ];
       for (const rk of releaseKeys) {
         await this.tryWriteLogicalTag(rk, false);
@@ -853,7 +855,9 @@ export class SiemensS7Adapter implements IndustrialController {
         await this.tryWriteLogicalTag('sim_manual_tag', false);
       } else {
         this.activeManualActionKeys.clear();
+        this.activeStopperKeys.clear();
         await this.tryWriteLogicalTag('manual_action_tag', false);
+        await this.tryWriteLogicalTag('accept_manual_tag', false);
       }
       await this.tryWriteLogicalTag('manual_mode_tag', active);
       return { ok: true, controlKey, active, message: active ? 'تم تفعيل الوضع اليدوي (Manual Mode)' : 'تم إيقاف الوضع اليدوي' };
@@ -864,8 +868,10 @@ export class SiemensS7Adapter implements IndustrialController {
       await this.tryWriteLogicalTag('user_logoff_tag', false);
       if (active) {
         this.activeManualActionKeys.clear();
+        this.activeStopperKeys.clear();
         await this.tryWriteLogicalTag('manual_mode_tag', false);
         await this.tryWriteLogicalTag('manual_action_tag', false);
+        await this.tryWriteLogicalTag('accept_manual_tag', false);
         await this.tryWriteLogicalTag('sim_manual_tag', false);
       }
       await this.tryWriteLogicalTag('auto_mode_tag', active);
@@ -888,7 +894,8 @@ export class SiemensS7Adapter implements IndustrialController {
     await this.tryWriteLogicalTag(controlKey, active, pulseMs);
 
     // TIA Portal HMI Pages 9-15: Stoppers S1-S4 (Man_LQ1..4) and Lanes L1-L4 (Man_L1..4) also set/reset manual_action (%M0.3)
-    // In Toggle mode, keep manual_action (%M0.3) HIGH while any toggled lane/stopper remains ON.
+    // Stoppers S1-S4 additionally toggle "Accept action manual" (%M0.4 / accept_manual_tag).
+    const stopperKeys = new Set(['man_s1_tag', 'man_s2_tag', 'man_s3_tag', 'man_s4_tag']);
     const needsManualAction = new Set([
       'man_s1_tag', 'man_s2_tag', 'man_s3_tag', 'man_s4_tag',
       'man_l1_tag', 'man_l2_tag', 'man_l3_tag', 'man_l4_tag',
@@ -900,6 +907,14 @@ export class SiemensS7Adapter implements IndustrialController {
         this.activeManualActionKeys.delete(controlKey);
       }
       await this.tryWriteLogicalTag('manual_action_tag', this.activeManualActionKeys.size > 0);
+    }
+    if (stopperKeys.has(controlKey)) {
+      if (active) {
+        this.activeStopperKeys.add(controlKey);
+      } else {
+        this.activeStopperKeys.delete(controlKey);
+      }
+      await this.tryWriteLogicalTag('accept_manual_tag', this.activeStopperKeys.size > 0);
     }
     return {
       ok: true,
