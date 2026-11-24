@@ -2,7 +2,9 @@ import { Controller, Get, Global, Inject, Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
-import { Public } from './common/decorators';
+import { AppCacheService, CacheModule } from './common/cache.module';
+import { Public, RequirePermissions } from './common/decorators';
+import { Permission } from './common/permissions';
 import { APP_CONFIG, AppConfig, loadConfig } from './config/app.config';
 import { DatabaseModule } from './database/database.module';
 import { AlarmsModule } from './modules/alarms/alarms.module';
@@ -22,19 +24,31 @@ export class HealthController {
   constructor(
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
     private readonly industrial: IndustrialIntegrationService,
+    private readonly cache: AppCacheService,
   ) {}
 
   @Public()
   @Get()
   async check() {
     const st = await this.industrial.getSystemStatus();
+    const cacheStats = this.cache.getStats();
     return {
       status: 'ok',
       mode: this.cfg.mode,
       adapter: st.adapter,
       controllerConnected: st.controllerConnected,
+      cache: {
+        entries: cacheStats.entries,
+        hitRatePct: cacheStats.hitRatePct,
+      },
       time: new Date().toISOString(),
     };
+  }
+
+  @Get('cache')
+  @RequirePermissions(Permission.DIAGNOSTICS_VIEW)
+  cacheStats() {
+    return this.cache.getStats();
   }
 }
 
@@ -53,6 +67,7 @@ export class ConfigProviderModule {}
 @Module({
   imports: [
     ConfigProviderModule,
+    CacheModule,
     ThrottlerModule.forRootAsync({
       inject: [APP_CONFIG],
       useFactory: (cfg: AppConfig) => [

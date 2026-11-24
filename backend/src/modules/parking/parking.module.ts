@@ -8,6 +8,7 @@ import { randomBytes } from 'crypto';
 import { Response } from 'express';
 import { DataSource, In, IsNull, Repository } from 'typeorm';
 import { APP_CONFIG, AppConfig } from '../../config/app.config';
+import { AppCacheService } from '../../common/cache.module';
 import {
   AuthUser, CurrentUser, ReqMeta, RequestMeta, RequireAnyPermission, RequirePermissions,
 } from '../../common/decorators';
@@ -81,7 +82,12 @@ export class ParkingService implements OnModuleInit, OnModuleDestroy {
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly realtime: RealtimeGateway,
+    private readonly cache: AppCacheService,
   ) {}
+
+  private invalidateParkingCache() {
+    this.cache.invalidatePrefix('parking:');
+  }
 
   onModuleInit() {
     this.industrial.onCommandFeedback((fb) => this.handleCommandFeedback(fb));
@@ -97,70 +103,75 @@ export class ParkingService implements OnModuleInit, OnModuleDestroy {
   /* ─────────────────────────── Dashboard & Spaces ─────────────────────────── */
 
   async getDashboard() {
-    const [system, spaces, alarmCounts, activeRequests] = await Promise.all([
-      this.industrial.getSystemStatus(),
-      this.spaceRepo.find(),
-      this.alarms.countUnresolved(),
-      this.reqRepo.count({ where: { status: In(ACTIVE_REQUEST_STATUSES) } }),
-    ]);
+    return this.cache.getOrSet('parking:dashboard', 3000, async () => {
+      const [system, spaces, alarmCounts, activeRequests] = await Promise.all([
+        this.industrial.getSystemStatus(),
+        this.spaceRepo.find(),
+        this.alarms.countUnresolved(),
+        this.reqRepo.count({ where: { status: In(ACTIVE_REQUEST_STATUSES) } }),
+      ]);
 
-    const totals = {
-      total: spaces.length,
-      available: 0,
-      occupied: 0,
-      reserved: 0,
-      moving: 0,
-      blocked: 0,
-      maintenance: 0,
-      error: 0,
-    };
-    const levelsSet = new Set<number>();
-    const zonesSet = new Set<string>();
-    for (const s of spaces) {
-      levelsSet.add(s.level);
-      zonesSet.add(s.zone);
-      switch (s.status) {
-        case SpaceStatus.AVAILABLE: totals.available++; break;
-        case SpaceStatus.OCCUPIED: totals.occupied++; break;
-        case SpaceStatus.RESERVED: totals.reserved++; break;
-        case SpaceStatus.MOVING: totals.moving++; break;
-        case SpaceStatus.BLOCKED: totals.blocked++; break;
-        case SpaceStatus.MAINTENANCE: totals.maintenance++; break;
-        case SpaceStatus.ERROR: totals.error++; break;
+      const totals = {
+        total: spaces.length,
+        available: 0,
+        occupied: 0,
+        reserved: 0,
+        moving: 0,
+        blocked: 0,
+        maintenance: 0,
+        error: 0,
+      };
+      const levelsSet = new Set<number>();
+      const zonesSet = new Set<string>();
+      for (const s of spaces) {
+        levelsSet.add(s.level);
+        zonesSet.add(s.zone);
+        switch (s.status) {
+          case SpaceStatus.AVAILABLE: totals.available++; break;
+          case SpaceStatus.OCCUPIED: totals.occupied++; break;
+          case SpaceStatus.RESERVED: totals.reserved++; break;
+          case SpaceStatus.MOVING: totals.moving++; break;
+          case SpaceStatus.BLOCKED: totals.blocked++; break;
+          case SpaceStatus.MAINTENANCE: totals.maintenance++; break;
+          case SpaceStatus.ERROR: totals.error++; break;
+        }
       }
-    }
 
-    let health = 100;
-    if (!system.controllerConnected) health -= 60;
-    if (system.emergencyStop || !system.safetyOk) health -= 50;
-    if (alarmCounts.critical > 0) health -= 30;
-    else if (alarmCounts.total > 0) health -= 10;
-    if (totals.error > 0) health -= Math.min(20, totals.error * 5);
-    health = Math.max(0, Math.min(100, health));
+      let health = 100;
+      if (!system.controllerConnected) health -= 60;
+      if (system.emergencyStop || !system.safetyOk) health -= 50;
+      if (alarmCounts.critical > 0) health -= 30;
+      else if (alarmCounts.total > 0) health -= 10;
+      if (totals.error > 0) health -= Math.min(20, totals.error * 5);
+      health = Math.max(0, Math.min(100, health));
 
-    return {
-      system,
-      totals,
-      activeAlarms: alarmCounts.total,
-      criticalAlarms: alarmCounts.critical,
-      activeRequests,
-      health,
-      levels: [...levelsSet].sort((a, b) => a - b),
-      zones: [...zonesSet].sort(),
-    };
+      return {
+        system,
+        totals,
+        activeAlarms: alarmCounts.total,
+        criticalAlarms: alarmCounts.critical,
+        activeRequests,
+        health,
+        levels: [...levelsSet].sort((a, b) => a - b),
+        zones: [...zonesSet].sort(),
+      };
+    });
   }
 
   async listSpaces(q: SpacesQuery, viewer?: AuthUser) {
-    const qb = this.spaceRepo
-      .createQueryBuilder('s')
-      .leftJoinAndSelect('s.vehicle', 'v')
-      .orderBy('s.level', 'ASC')
-      .addOrderBy('s.zone', 'ASC')
-      .addOrderBy('s.spaceNumber', 'ASC');
-    if (q.level !== undefined) qb.andWhere('s.level = :lvl', { lvl: q.level });
-    if (q.zone) qb.andWhere('s.zone = :zn', { zn: q.zone });
-    if (q.status) qb.andWhere('s.status = :st', { st: q.status });
-    const rows = await qb.getMany();
+    const cacheKey = `parking:spaces:${q.level ?? 'all'}:${q.zone ?? 'all'}:${q.status ?? 'all'}`;
+    const rows = await this.cache.getOrSet(cacheKey, 5000, async () => {
+      const qb = this.spaceRepo
+        .createQueryBuilder('s')
+        .leftJoinAndSelect('s.vehicle', 'v')
+        .orderBy('s.level', 'ASC')
+        .addOrderBy('s.zone', 'ASC')
+        .addOrderBy('s.spaceNumber', 'ASC');
+      if (q.level !== undefined) qb.andWhere('s.level = :lvl', { lvl: q.level });
+      if (q.zone) qb.andWhere('s.zone = :zn', { zn: q.zone });
+      if (q.status) qb.andWhere('s.status = :st', { st: q.status });
+      return qb.getMany();
+    });
     return rows.map((s) => this.toSpaceDto(s, viewer));
   }
 
@@ -417,6 +428,7 @@ export class ParkingService implements OnModuleInit, OnModuleDestroy {
     const fullDto = await this.getRequest(reqEntity.id, user);
     this.realtime.emitToUserAndStaff(reqEntity.userId, 'parking.request.created', fullDto);
     this.realtime.emitToAll('parking.space.updated', await this.getSpace(spaceEntity.id));
+    this.invalidateParkingCache();
     this.realtime.emitToStaff('command.updated', await this.industrial.getCommand(cmdEntity.id));
 
     await this.audit.log({
@@ -569,6 +581,7 @@ export class ParkingService implements OnModuleInit, OnModuleDestroy {
       if (sp && sp.status !== SpaceStatus.MOVING) {
         sp.status = SpaceStatus.MOVING;
         await this.spaceRepo.save(sp);
+        this.invalidateParkingCache();
         this.realtime.emitToAll('parking.space.updated', await this.getSpace(sp.id));
       }
 
@@ -621,6 +634,7 @@ export class ParkingService implements OnModuleInit, OnModuleDestroy {
         }
         sp.statusReason = null;
         await this.spaceRepo.save(sp);
+        this.invalidateParkingCache();
         this.realtime.emitToAll('parking.space.updated', await this.getSpace(sp.id));
       }
 
@@ -696,6 +710,7 @@ export class ParkingService implements OnModuleInit, OnModuleDestroy {
           sp.statusReason = errMsg;
         }
         await this.spaceRepo.save(sp);
+        this.invalidateParkingCache();
         this.realtime.emitToAll('parking.space.updated', await this.getSpace(sp.id));
       }
 

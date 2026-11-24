@@ -422,9 +422,59 @@ namespace AutoPark
             if (sp == null) return;
 
             string plate = (_txtPlate.Text ?? "").Trim();
+            if (isParkIn && string.IsNullOrEmpty(plate)) plate = "JO-" + DateTime.Now.ToString("HHmm");
+            if (!isParkIn && string.IsNullOrEmpty(plate)) plate = sp.PlateNumber ?? "";
+
+            // When backend is online, dispatch through the full 15-step safety workflow & verified TIA Portal 2-step S7-1200 sequence!
+            if (st.BackendConnected && !string.IsNullOrEmpty(st.BackendToken))
+            {
+                string endpoint = isParkIn ? "/parking/request" : "/parking/retrieve";
+                string safePlate = (plate ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
+                string safeSpace = (sp.SpaceNumber ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
+                string payload = "{\"plateNumber\":\"" + safePlate + "\",\"targetSpaceNumber\":\"" + safeSpace + "\",\"source\":\"ADMIN\"}";
+                SetStatus(Loc.T("Dispatching full S7-1200 2-step sequence for " + sp.SpaceNumber + "...", "جاري إرسال تتابع الرفع الكامل لـ " + sp.SpaceNumber + "..."), Theme.Primary);
+
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    string resp = st.PostApiRaw(endpoint, payload);
+                    if (resp != null && !resp.StartsWith("ERR:"))
+                    {
+                        st.PullSpacesFromDatabase();
+                        st.PullSensorsFromBackend();
+                        SetStatus(isParkIn
+                            ? Loc.T("S7-1200 Park-IN sequence dispatched for " + sp.SpaceNumber + " (" + plate + ")", "تم إرسال أمر الإيداع الكامل للمصف " + sp.SpaceNumber)
+                            : Loc.T("S7-1200 Retrieve-OUT sequence dispatched for " + sp.SpaceNumber, "تم إرسال أمر الاسترجاع الكامل للمصف " + sp.SpaceNumber),
+                            Theme.Ok);
+                        if (!IsDisposed && IsHandleCreated)
+                        {
+                            try { BeginInvoke((Action)RefreshBayMatrix); } catch { }
+                        }
+                        return;
+                    }
+                    // If PLC is offline (e.g., standalone demo/bench), fall back safely to local state update
+                    if (!IsDisposed && IsHandleCreated)
+                    {
+                        try
+                        {
+                            BeginInvoke((Action)delegate
+                            {
+                                ApplyLocalStandaloneBayOp(sp, isParkIn, plate, resp);
+                            });
+                        }
+                        catch { }
+                    }
+                });
+                return;
+            }
+
+            ApplyLocalStandaloneBayOp(sp, isParkIn, plate, null);
+        }
+
+        void ApplyLocalStandaloneBayOp(SpaceItem sp, bool isParkIn, string plate, string backendErr)
+        {
+            var st = ParkState.Instance;
             if (isParkIn)
             {
-                if (string.IsNullOrEmpty(plate)) plate = "JO-" + DateTime.Now.ToString("HHmm");
                 sp.Status = "OCCUPIED";
                 sp.PlateNumber = plate;
                 sp.OwnerName = Loc.UserDisplay(_shell.CurrentUser);
@@ -433,8 +483,7 @@ namespace AutoPark
                 st.RecordLocalAudit("PARK", sp.SpaceNumber, plate + " (Standalone Direct HMI)", Loc.UserDisplay(_shell.CurrentUser));
                 st.Save();
                 st.NotifyChanged();
-                SetStatus(Loc.T("Parked " + plate + " in " + sp.SpaceNumber + " directly (No VNC).", "تم إيداع " + plate + " في " + sp.SpaceNumber + " مباشرة بدون VNC."), Theme.Ok);
-                SendTagQuick("DB2,X6.3", 1, 350, "Park_IN (" + sp.SpaceNumber + ")");
+                SetStatus(Loc.T("Standalone Local Park-IN: " + plate + " -> " + sp.SpaceNumber + (string.IsNullOrEmpty(backendErr) ? "" : " (PLC Offline)"), "تم الإيداع محلياً (مستقل): " + sp.SpaceNumber), Theme.Ok);
             }
             else
             {
@@ -447,8 +496,7 @@ namespace AutoPark
                 st.RecordLocalAudit("RETRIEVE", sp.SpaceNumber, prevPlate + " (Standalone Direct HMI)", Loc.UserDisplay(_shell.CurrentUser));
                 st.Save();
                 st.NotifyChanged();
-                SetStatus(Loc.T("Retrieved " + prevPlate + " from " + sp.SpaceNumber + " directly (No VNC).", "تم استرجاع " + prevPlate + " من " + sp.SpaceNumber + " مباشرة بدون VNC."), Theme.Ok);
-                SendTagQuick("DB2,X6.4", 1, 350, "Park_OUT (" + sp.SpaceNumber + ")");
+                SetStatus(Loc.T("Standalone Local Retrieve-OUT: " + prevPlate + " <- " + sp.SpaceNumber + (string.IsNullOrEmpty(backendErr) ? "" : " (PLC Offline)"), "تم الاسترجاع محلياً (مستقل): " + sp.SpaceNumber), Theme.Ok);
             }
         }
 

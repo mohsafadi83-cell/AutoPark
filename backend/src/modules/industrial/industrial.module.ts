@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Global, Module, Param, Post, Put, Query } from '@nestjs/common';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsDefined, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { AuthUser, CurrentUser, ReqMeta, RequestMeta, RequirePermissions } from '../../common/decorators';
 import { CommandStatus, RequestType } from '../../common/enums';
 import { PaginationQuery } from '../../common/pagination';
@@ -20,6 +20,30 @@ export class SimulationScenarioDto {
     'RAISE_WARNING', 'RAISE_CRITICAL', 'EMERGENCY_STOP', 'CLEAR_EMERGENCY', 'CLEAR_ALARMS',
   ])
   scenario: MockScenario;
+}
+
+export class EmergencyRecoveryDto {
+  @IsIn(['COMPLETE_SEQ', 'RETURN_PARK', 'SAFE_RESET', 'ESTOP_ON', 'ESTOP_OFF'])
+  action: EmergencyRecoveryAction;
+}
+
+export class ManualControlDto {
+  @IsString()
+  controlKey: string;
+
+  @IsBoolean()
+  active: boolean;
+}
+
+export class WritePlcTagDto {
+  @IsString()
+  address: string;
+
+  @IsDefined()
+  value: boolean | number;
+
+  @IsOptional() @IsInt() @Min(0) @Max(3000)
+  pulseMs?: number;
 }
 
 @Controller()
@@ -61,7 +85,7 @@ export class IndustrialControllerHttp {
    */
   @Post('industrial/s7/recovery')
   executeEmergencyRecovery(
-    @Body() body: { action: EmergencyRecoveryAction },
+    @Body() body: EmergencyRecoveryDto,
     @CurrentUser() user: AuthUser,
     @ReqMeta() meta: RequestMeta,
   ) {
@@ -78,7 +102,7 @@ export class IndustrialControllerHttp {
   @Post('industrial/s7/manual')
   @RequirePermissions(Permission.DIAGNOSTICS_VIEW)
   executeManualControl(
-    @Body() body: { controlKey: string; active: boolean },
+    @Body() body: ManualControlDto,
     @CurrentUser() user: AuthUser,
     @ReqMeta() meta: RequestMeta,
   ) {
@@ -86,9 +110,9 @@ export class IndustrialControllerHttp {
   }
 
   @Post('industrial/s7/write')
-  @RequirePermissions(Permission.DIAGNOSTICS_VIEW)
+  @RequirePermissions(Permission.CONFIG_MANAGE)
   async writeLiveS7Tag(
-    @Body() body: { address: string; value: boolean | number; pulseMs?: number },
+    @Body() body: WritePlcTagDto,
     @CurrentUser() user: AuthUser,
     @ReqMeta() meta: RequestMeta,
   ) {

@@ -2,7 +2,8 @@ import { Body, Controller, Get, HttpCode, Injectable, Logger, OnModuleDestroy, P
 import { execFileSync } from 'child_process';
 import { Response } from 'express';
 import * as net from 'net';
-import { Public } from '../../common/decorators';
+import { RequirePermissions } from '../../common/decorators';
+import { Permission } from '../../common/permissions';
 
 /**
  * Encrypts a 16-byte VNC challenge with the VNC password (bit-reversed 8-byte DES key in ECB mode).
@@ -346,37 +347,33 @@ export class VncBridgeService implements OnModuleDestroy {
 }
 
 @Controller('industrial/vnc')
+@RequirePermissions(Permission.CONFIG_MANAGE)
 export class VncWebController {
   constructor(private readonly vnc: VncBridgeService) {}
 
-  @Public()
   @Get('status')
   status() {
     return this.vnc.getStatus();
   }
 
-  @Public()
   @Post('connect')
   @HttpCode(200)
   connect(@Body() body: { host?: string; port?: number; password?: string }) {
     return this.vnc.connect(body.host || '192.168.0.30', body.port || 5900, body.password || '');
   }
 
-  @Public()
   @Post('pointer')
   @HttpCode(204)
   pointer(@Body() body: { x: number; y: number; mask: number }) {
     this.vnc.sendPointer(body.x, body.y, body.mask);
   }
 
-  @Public()
   @Post('tap')
   @HttpCode(200)
   tap(@Body() body: { spot: string }) {
     return this.vnc.tapSpot(body.spot);
   }
 
-  @Public()
   @Get('frame.bmp')
   frame(@Res() res: Response) {
     res.setHeader('Content-Type', 'image/bmp');
@@ -384,7 +381,6 @@ export class VncWebController {
     res.send(this.vnc.buildBmpBuffer());
   }
 
-  @Public()
   @Get('view')
   viewPage(@Res() res: Response) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');

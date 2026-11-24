@@ -54,13 +54,23 @@ export interface PlcSensorsSnapshot {
 
 export type EmergencyRecoveryAction = 'COMPLETE_SEQ' | 'RETURN_PARK' | 'SAFE_RESET' | 'ESTOP_ON' | 'ESTOP_OFF';
 
+export interface DryRunWriteRecord {
+  time: string;
+  tagKey: string | null;
+  address: string;
+  value: boolean | number;
+  pulseMs?: number;
+}
+
 /**
- * Maps UI floor (P3=3 top, P2=2 mid, P1=1 bottom) to PLC Level_Number (1=Top, 2=Mid, 3=Bottom).
+ * Maps bay level digit (L{lane}{level}: 1, 2, 3) directly to TIA Portal `ParkDB.Level_Number` (1, 2, 3).
+ * Verified from TIA Portal V17 HMI PDF pp. 42–61 & 159–168:
+ *   L11 -> Lane=1, Level=1 | L12 -> Lane=1, Level=2 | L13 -> Lane=1, Level=3.
  */
 export function mapUiFloorToPlcLevel(uiFloor: number): number {
-  if (uiFloor === 3) return 1; // Top (P3) -> PLC Level 1
-  if (uiFloor === 2) return 2; // Mid (P2) -> PLC Level 2
-  return 3;                    // Bottom (P1) -> PLC Level 3
+  if (uiFloor <= 1) return 1;
+  if (uiFloor === 2) return 2;
+  return 3;
 }
 
 /**
@@ -91,8 +101,12 @@ export class SiemensS7Adapter implements IndustrialController {
 
   private listeners = new Set<ControllerEventListener>();
   private connected = false;
+  private dryRunMode = false;
+  private dryRunWrites: DryRunWriteRecord[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private conn: any = null;
+  private translationMap: Record<string, string> = {};
+  private writeChain: Promise<void> = Promise.resolve();
   private pollTimer: NodeJS.Timeout | null = null;
   private polling = false;
   private consecutivePollErrors = 0;
@@ -183,7 +197,8 @@ export class SiemensS7Adapter implements IndustrialController {
               ),
             );
           }
-          c.setTranslationCB((tag: string) => vars[tag]);
+          this.translationMap = { ...vars };
+          c.setTranslationCB((tag: string) => this.translationMap[tag]);
           c.addItems(Object.keys(vars));
           this.conn = c;
           this.connected = true;
@@ -195,6 +210,34 @@ export class SiemensS7Adapter implements IndustrialController {
 
     this.emit({ type: 'CONNECTION', connected: true });
     this.startPolling();
+  }
+
+  /**
+   * Enables 100% hardware-safe Dry-Run / Simulation Mode (ZERO network traffic, ZERO physical machinery movement).
+   * Records every logical/absolute tag write into `dryRunWrites` for deterministic engineering verification.
+   */
+  enableDryRun(initialValues: Record<string, unknown> = {}): void {
+    this.dryRunMode = true;
+    this.connected = true;
+    this.lastHeartbeatAt = new Date();
+    this.translationMap = this.buildTranslationMap();
+    this.lastValues = { ...initialValues };
+    this.dryRunWrites = [];
+    this.decodePlcAlarms(this.lastValues);
+  }
+
+  setDryRunSensorValues(patch: Record<string, unknown>): void {
+    this.lastValues = { ...this.lastValues, ...patch };
+    this.lastHeartbeatAt = new Date();
+    this.decodePlcAlarms(this.lastValues);
+  }
+
+  getDryRunWrites(): DryRunWriteRecord[] {
+    return [...this.dryRunWrites];
+  }
+
+  clearDryRunWrites(): void {
+    this.dryRunWrites = [];
   }
 
   async disconnect(): Promise<void> {
@@ -212,6 +255,7 @@ export class SiemensS7Adapter implements IndustrialController {
         }
       });
     }
+    this.dryRunMode = false;
     if (this.connected) {
       this.connected = false;
       this.emit({ type: 'CONNECTION', connected: false, reason: 'S7-1200 disconnected' });
@@ -219,7 +263,7 @@ export class SiemensS7Adapter implements IndustrialController {
   }
 
   isConnected(): boolean {
-    return this.connected && Boolean(this.conn);
+    return this.connected && (this.dryRunMode || Boolean(this.conn));
   }
 
   private startPolling() {
@@ -277,7 +321,9 @@ export class SiemensS7Adapter implements IndustrialController {
     const alarmWord = Number(v.alarm_tag ?? 0);
     const alarmSection = Number(v.alarm_section_tag ?? v.command_error_tag ?? 0);
     const eStop = Boolean(v.emergency_status_tag) || Boolean(alarmWord & (1 << 0)) || this.softEmergencyStop;
-    const errPos = Boolean(alarmSection & (1 << 11));
+    const pumpOverload = Boolean(v.pump_overload_tag) || Boolean(alarmSection & (1 << 9));
+    const compressorOverload = Boolean(v.compressor_overload_tag) || Boolean(alarmSection & (1 << 10));
+    const errPos = Boolean(v.error_in_position_tag) || Boolean(alarmSection & (1 << 11));
     const stopperFault = Boolean(v.stopper_fault_tag) || Boolean(alarmSection & (1 << 12));
     const liftInvalid = Boolean(v.lift_invalid_pos_tag) || Boolean(alarmSection & (1 << 13));
     const maintDue = Boolean(v.maintenance_due_tag);
@@ -287,6 +333,22 @@ export class SiemensS7Adapter implements IndustrialController {
         code: 'PLC_EMERGENCY_STOP',
         severity: AlarmSeverity.EMERGENCY,
         description: 'إيقاف الطوارئ مفعّل (ES1 / ES2 — Emergency Stop)',
+        source: 'PLC_S7_1200',
+      });
+    }
+    if (pumpOverload) {
+      next.set('PLC_HYDRAULIC_PUMP_OVERLOAD', {
+        code: 'PLC_HYDRAULIC_PUMP_OVERLOAD',
+        severity: AlarmSeverity.CRITICAL,
+        description: 'زيادة حمل مضخة الهيدروليك (Hydraulic Pump Overload — %M50.1)',
+        source: 'PLC_S7_1200',
+      });
+    }
+    if (compressorOverload) {
+      next.set('PLC_COMPRESSOR_OVERLOAD', {
+        code: 'PLC_COMPRESSOR_OVERLOAD',
+        severity: AlarmSeverity.CRITICAL,
+        description: 'زيادة حمل الضاغط الهوائي (Compressor Overload — %M50.2)',
         source: 'PLC_S7_1200',
       });
     }
@@ -495,13 +557,13 @@ export class SiemensS7Adapter implements IndustrialController {
       this.emit({
         type: 'LOG',
         level: 'warn',
-        message: `Tag ${tagKey} (${addr}) uses symbolic TIA syntax; switch DB to non-optimized absolute address (e.g. DB1,X0.0) or use OPC UA for direct write.`,
+        message: `Tag ${tagKey} (${addr}) uses symbolic TIA syntax; map DB offset (e.g. DB2,B3) or use OPC UA for direct write.`,
       });
       return false;
     }
     if (!this.isConnected()) return false;
     try {
-      await this.writePlcTag(addr, value, pulseMs);
+      await this.writePlcTagInternal(addr, value, pulseMs, tagKey);
       return true;
     } catch (err) {
       this.emit({ type: 'LOG', level: 'warn', message: `Write ${tagKey} (${addr}) failed: ${(err as Error).message}` });
@@ -510,11 +572,29 @@ export class SiemensS7Adapter implements IndustrialController {
   }
 
   /**
-   * Directly writes or pulses a tag on the SIMATIC S7-1200 PLC (e.g. `M10.0`, `DB1,X0.0`, `MW10`).
+   * Directly writes or pulses an HMI interface tag on the SIMATIC S7-1200 PLC (`M...` or `DB...`).
+   * SAFETY: Rejects direct raw writes to physical output process image (`Q...`) so PLC interlocks are never bypassed.
    */
   async writePlcTag(address: string, value: boolean | number, pulseMs?: number): Promise<{ ok: boolean; address: string; value: boolean | number; note?: string }> {
+    return this.writePlcTagInternal(address, value, pulseMs, null);
+  }
+
+  private async writePlcTagInternal(
+    address: string,
+    value: boolean | number,
+    pulseMs: number | undefined,
+    tagKey: string | null,
+  ): Promise<{ ok: boolean; address: string; value: boolean | number; note?: string }> {
     const cleanAddr = address.trim();
     if (!cleanAddr) throw new ControllerError('PLC tag address is required', 'NOT_CONFIGURED');
+
+    // Industrial Safety Guard: NEVER allow raw direct writes to physical PLC outputs (Q0.0, QB0, etc.)
+    if (/^Q/i.test(cleanAddr)) {
+      throw new ControllerError(
+        `Safety Interlock: Direct write to physical output "${cleanAddr}" is prohibited. Use DB1/DB2/%M HMI interface tags only.`,
+        'REJECTED',
+      );
+    }
 
     if (!isNodes7Address(cleanAddr)) {
       return {
@@ -525,8 +605,70 @@ export class SiemensS7Adapter implements IndustrialController {
       };
     }
 
-    const writeOnce = (val: boolean | number) =>
+    // Hardware-safe Dry-Run / Simulation mode (zero socket traffic, zero physical movement)
+    if (this.dryRunMode) {
+      this.dryRunWrites.push({
+        time: new Date().toISOString(),
+        tagKey,
+        address: cleanAddr,
+        value,
+        pulseMs,
+      });
+      if (tagKey) {
+        this.lastValues[tagKey] = value;
+      }
+      this.lastValues[cleanAddr] = value;
+      if (pulseMs && pulseMs > 0 && typeof value === 'boolean') {
+        this.dryRunWrites.push({
+          time: new Date().toISOString(),
+          tagKey,
+          address: cleanAddr,
+          value: !value,
+          pulseMs: 0,
+        });
+        if (tagKey) this.lastValues[tagKey] = !value;
+        this.lastValues[cleanAddr] = !value;
+      }
+      this.decodePlcAlarms(this.lastValues);
+      return { ok: true, address: cleanAddr, value, note: 'DRY_RUN_SIMULATED' };
+    }
+
+    const writeOnPersistentOrFallback = (val: boolean | number) =>
       new Promise<void>((resolve, reject) => {
+        // Reuse persistent S7-1200 ISO-on-TCP connection when available (prevents CPU 1212C TCP slot exhaustion!)
+        if (this.conn && this.connected) {
+          const itemKey = tagKey && this.translationMap[tagKey] === cleanAddr
+            ? tagKey
+            : `__WR_${cleanAddr.replace(/[^A-Za-z0-9_]/g, '_')}`;
+          if (!this.translationMap[itemKey]) {
+            this.translationMap[itemKey] = cleanAddr;
+            try {
+              this.conn.addItems([itemKey]);
+            } catch {
+              /* already added */
+            }
+          }
+          let settled = false;
+          const timer = setTimeout(() => {
+            if (!settled) {
+              settled = true;
+              reject(new ControllerError(`S7-1200 write timeout on ${cleanAddr}`, 'WRITE_FAILED'));
+            }
+          }, 3500);
+          this.conn.writeItems([itemKey], [val], (wErr?: unknown) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (wErr) {
+              const errMsg = wErr instanceof Error ? wErr.message : typeof wErr === 'object' ? JSON.stringify(wErr) : String(wErr);
+              return reject(new ControllerError(`S7-1200 write error on ${cleanAddr}: ${errMsg}`, 'WRITE_FAILED'));
+            }
+            resolve();
+          });
+          return;
+        }
+
+        // Fallback one-shot connection if persistent socket is closed
         const c = new nodes7({ silent: true });
         c.initiateConnection(
           { host: this.host, port: this.port, rack: this.rack, slot: this.slot, timeout: 3000 },
@@ -544,12 +686,22 @@ export class SiemensS7Adapter implements IndustrialController {
         );
       });
 
-    await writeOnce(value);
-    if (pulseMs && pulseMs > 0 && typeof value === 'boolean') {
-      await new Promise((r) => setTimeout(r, Math.min(3000, pulseMs)));
-      await writeOnce(!value);
+    // Serialize all S7 writes through a FIFO chain so concurrent button clicks never collide on TCP
+    const execWrite = async () => {
+      await writeOnPersistentOrFallback(value);
+      if (pulseMs && pulseMs > 0 && typeof value === 'boolean') {
+        await new Promise((r) => setTimeout(r, Math.min(3000, pulseMs)));
+        await writeOnPersistentOrFallback(!value);
+      }
+    };
+
+    const run = this.writeChain.then(execWrite, execWrite);
+    this.writeChain = run.catch(() => undefined);
+    await run;
+
+    if (!this.polling && this.conn) {
+      await this.pollOnce();
     }
-    await this.pollOnce();
     return { ok: true, address: cleanAddr, value };
   }
 
@@ -629,7 +781,8 @@ export class SiemensS7Adapter implements IndustrialController {
       'man_up_tag', 'man_down_tag',
       'man_s1_tag', 'man_s2_tag', 'man_s3_tag', 'man_s4_tag',
       'man_l1_tag', 'man_l2_tag', 'man_l3_tag', 'man_l4_tag',
-      'allow_wall_tag', 'maintenance_reset_tag',
+      'allow_wall_tag', 'maintenance_reset_tag', 'siren_silencer_tag', 'obstacle_reset_tag',
+      'stop_all_manual',
       'spot_L11_tag', 'spot_L12_tag', 'spot_L13_tag',
       'spot_L21_tag', 'spot_L22_tag', 'spot_L23_tag',
       'spot_L31_tag', 'spot_L32_tag', 'spot_L33_tag',
@@ -639,8 +792,27 @@ export class SiemensS7Adapter implements IndustrialController {
       throw new ControllerError(`Unauthorized manual control key: ${controlKey}`, 'REJECTED');
     }
 
+    if (controlKey === 'stop_all_manual') {
+      const releaseKeys = [
+        'man_pump_tag', 'man_wall_tag', 'man_up_tag', 'man_down_tag', 'man_cutoff_tag',
+        'man_l1_tag', 'man_l2_tag', 'man_l3_tag', 'man_l4_tag',
+        'man_s1_tag', 'man_s2_tag', 'man_s3_tag', 'man_s4_tag',
+        'manual_action_tag',
+      ];
+      for (const rk of releaseKeys) {
+        await this.tryWriteLogicalTag(rk, false);
+      }
+      return { ok: true, controlKey, active: false, message: 'All manual outputs safely released (OFF)' };
+    }
+
     const sensors = this.getSensorsSnapshot();
-    if (active && sensors.emergencyStop && controlKey !== 'auto_mode_tag' && controlKey !== 'manual_mode_tag') {
+    if (
+      active &&
+      sensors.emergencyStop &&
+      controlKey !== 'auto_mode_tag' &&
+      controlKey !== 'manual_mode_tag' &&
+      controlKey !== 'siren_silencer_tag'
+    ) {
       throw new ControllerError('Cannot activate manual output while Emergency Stop is active', 'REJECTED');
     }
 
@@ -769,34 +941,59 @@ export class SiemensS7Adapter implements IndustrialController {
       throw new ControllerError('Lift is not in valid position (Lift_not_in_vaild_position = ON)', 'REJECTED');
     }
 
-    // Parse spot number: "L23" -> Lane 2, UI Floor 3 (Top) -> PLC Level 1
+    // Parse spot number: "L23" -> Lane 2, Level 3 (direct 1:1 match with TIA Portal PDF pp. 42-61 & 159-168!)
     const spotStr = (cmd.spaceNumber || '').toUpperCase().trim();
     const match = spotStr.match(/L?([1-4])([1-3])/);
     const lane = match ? Number(match[1]) : 1;
     const uiFloor = match ? Number(match[2]) : 1;
     const plcLevel = mapUiFloorToPlcLevel(uiFloor);
 
-    // Real TIA Portal 2-Step Auto Handshake:
-    // Step 1: Write Lane_Number (1..4), Level_Number (1=Top, 2=Mid, 3=Bottom), Auto_DB=1, Park_IN/OUT, Step1_Ready, pulse Step1_Start
-    await this.tryWriteLogicalTag('auto_mode_tag', true);
-    await this.tryWriteLogicalTag('lane_number_tag', lane);
-    await this.tryWriteLogicalTag('level_number_tag', plcLevel);
-    await this.tryWriteLogicalTag(cmd.type === 'PARK' ? 'park_command_tag' : 'retrieve_command_tag', true, 350);
-    await this.tryWriteLogicalTag('step1_ready_tag', true);
-    await this.tryWriteLogicalTag('step1_start_tag', true, 350);
+    // -------------------------------------------------------------------------
+    // Official TIA Portal V17 2-Step Auto Handshake (Verified from HMI_RT_2 PDF):
+    // 1) Screen Load Reset (pp. 102-103): clear User_Logoff, Manual_DB, Sim Manual, manual_action
+    // 2) Bay Select (pp. 42-61, 159-168):
+    //    - Park IN: SetBit(Lane{n}_check_location %M3.4..3.7), SetTag(Lane_Number, Level_Number), SetBit(Park_IN DB2,X6.3)
+    //    - Park OUT: SetTag(Lane_Number, Level_Number), SetBit(Park_OUT DB2,X6.4)
+    //    Note: Park_IN / Park_OUT are LATCHED (SetBit), NOT pulsed for 350ms!
+    // 3) Auto Screen Arm (p. 103): SetBit(Auto_DB DB1,X0.3), SetBit(Park_Step1_Ready DB2,X5.4)
+    // 4) Step 1 Start (p. 108): SetBit(Park_IN_Step1_Start %M10.0) [LATCHED], ResetBit(Park_Step1_Ready DB2,X5.4)
+    // 5) Step 2 Start (p. 104): SetBit(Park_IN_Step2_Start %M10.1) [LATCHED], ResetBit(Park_Step2_Ready DB2,X5.6)
+    // -------------------------------------------------------------------------
+    await this.tryWriteLogicalTag('user_logoff_tag', false);
+    await this.tryWriteLogicalTag('manual_mode_tag', false);
+    await this.tryWriteLogicalTag('sim_manual_tag', false);
+    await this.tryWriteLogicalTag('manual_action_tag', false);
 
-    // Optional background mirror to HMI if connected, never required
-    if (this.vncBridge?.getStatus().connected) {
-      this.vncBridge.tapSpot(cmd.spaceNumber).catch(() => undefined);
+    if (cmd.type === 'PARK') {
+      await this.tryWriteLogicalTag(`check_loc_L${lane}`, true);
     }
 
+    await this.tryWriteLogicalTag('lane_number_tag', lane);
+    await this.tryWriteLogicalTag('level_number_tag', plcLevel);
+
+    if (cmd.type === 'PARK') {
+      await this.tryWriteLogicalTag('retrieve_command_tag', false);
+      await this.tryWriteLogicalTag('park_command_tag', true);
+    } else {
+      await this.tryWriteLogicalTag('park_command_tag', false);
+      await this.tryWriteLogicalTag('retrieve_command_tag', true);
+    }
+
+    await this.tryWriteLogicalTag('auto_mode_tag', true);
+    await this.tryWriteLogicalTag('step1_ready_tag', true);
+
+    // Trigger Step 1 Start (latched ON — PLC resets %M10.0 upon completion; ResetBit Step1_Ready per PDF p. 108)
+    await this.tryWriteLogicalTag('step1_start_tag', true);
+    await this.tryWriteLogicalTag('step1_ready_tag', false);
+
+    // Standalone Direct S7 mode: no VNC connection required!
     const rc: ActiveS7Command = {
       cmd,
       feedback: {
         commandId: cmd.commandId,
         status: 'RECEIVED',
         progress: 0,
-        raw: { plcHost: this.host, spot: cmd.spaceNumber, lane, uiFloor, plcLevel },
+        raw: { plcHost: this.host, spot: cmd.spaceNumber, lane, uiFloor, plcLevel, dryRun: this.dryRunMode },
       },
       timers: [],
     };
@@ -817,11 +1014,13 @@ export class SiemensS7Adapter implements IndustrialController {
         ? ['STEP1_PRECHECK_OK', 'STEP1_LIFT_TO_TARGET_LEVEL', 'STEP1_FLOOR_LIMIT_SWITCH_LOCKED', 'STEP2_RETURN_PARK_AND_CLOSE_WALL']
         : ['STEP1_PRECHECK_OK', 'STEP1_LOCATING_PALLET', 'STEP1_FLOOR_LIMIT_SWITCH_LOCKED', 'STEP2_EXIT_GATE_READY'];
 
+    const ackDelay = this.dryRunMode ? 15 : 350;
+    const stepDelay = this.dryRunMode ? 25 : 750;
+
     rc.timers.push(
-      setTimeout(() => this.updateCmd(rc, { status: 'ACKNOWLEDGED', progress: 15, phase: phases[0] }), 350),
+      setTimeout(() => this.updateCmd(rc, { status: 'ACKNOWLEDGED', progress: 15, phase: phases[0] }), ackDelay),
     );
 
-    const stepDelay = 750;
     pathFloors.forEach((f, idx) => {
       rc.timers.push(
         setTimeout(() => {
@@ -832,17 +1031,19 @@ export class SiemensS7Adapter implements IndustrialController {
             progress,
             phase: `FLOOR_STOP_P${f}_LS_${f === 3 ? 'TOP' : f === 2 ? 'MID' : 'BTM'}`,
           });
-        }, 450 + (idx + 1) * stepDelay),
+        }, ackDelay + (idx + 1) * stepDelay),
       );
     });
 
-    // Step 2: Return Park / Close Wall handshake
-    const step2Time = 450 + (pathFloors.length + 1) * stepDelay;
+    // Step 2: Return Park & Close Wall (PDF p. 104: SetBit Park_IN_Step2_Start %M10.1, ResetBit Park_Step2_Ready DB2,X5.6)
+    const step2Time = ackDelay + (pathFloors.length + 1) * stepDelay;
     rc.timers.push(
       setTimeout(() => {
-        void this.tryWriteLogicalTag('step2_ready_tag', true);
-        void this.tryWriteLogicalTag('step2_start_tag', true, 350);
-        this.updateCmd(rc, { status: 'EXECUTING', progress: 90, phase: phases[3] });
+        void (async () => {
+          await this.tryWriteLogicalTag('step2_start_tag', true);
+          await this.tryWriteLogicalTag('step2_ready_tag', false);
+          this.updateCmd(rc, { status: 'EXECUTING', progress: 90, phase: phases[3] });
+        })();
       }, step2Time),
     );
 
@@ -853,7 +1054,7 @@ export class SiemensS7Adapter implements IndustrialController {
           progress: 100,
           phase: cmd.type === 'PARK' ? 'VEHICLE_PARKED' : 'VEHICLE_AT_EXIT',
         });
-      }, step2Time + 750),
+      }, step2Time + stepDelay),
     );
   }
 

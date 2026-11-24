@@ -2,6 +2,7 @@ import { Body, Controller, Get, Global, Injectable, Module, Param, Post, Query }
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsOptional, IsString } from 'class-validator';
 import { In, Repository } from 'typeorm';
+import { AppCacheService } from '../../common/cache.module';
 import { AuthUser, CurrentUser, ReqMeta, RequestMeta, RequirePermissions } from '../../common/decorators';
 import { AlarmSeverity, AlarmStatus, EventCategory, NotificationType } from '../../common/enums';
 import { AppError } from '../../common/errors';
@@ -30,6 +31,7 @@ export class AlarmsService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly realtime: RealtimeGateway,
+    private readonly cache: AppCacheService,
   ) {}
 
   async list(q: AlarmQuery) {
@@ -47,21 +49,25 @@ export class AlarmsService {
   }
 
   async countUnresolved(): Promise<{ total: number; critical: number }> {
-    const active = await this.alarmRepo.find({
-      where: { status: In([AlarmStatus.ACTIVE, AlarmStatus.ACKNOWLEDGED]) },
+    return this.cache.getOrSet('alarms:unresolved_counts', 3000, async () => {
+      const active = await this.alarmRepo.find({
+        where: { status: In([AlarmStatus.ACTIVE, AlarmStatus.ACKNOWLEDGED]) },
+      });
+      const critical = active.filter((a) => [AlarmSeverity.CRITICAL, AlarmSeverity.EMERGENCY].includes(a.severity)).length;
+      return { total: active.length, critical };
     });
-    const critical = active.filter((a) => [AlarmSeverity.CRITICAL, AlarmSeverity.EMERGENCY].includes(a.severity)).length;
-    return { total: active.length, critical };
   }
 
   async hasBlockingAlarm(): Promise<boolean> {
-    const c = await this.alarmRepo.count({
-      where: {
-        status: In([AlarmStatus.ACTIVE, AlarmStatus.ACKNOWLEDGED]),
-        severity: In([AlarmSeverity.CRITICAL, AlarmSeverity.EMERGENCY]),
-      },
+    return this.cache.getOrSet('alarms:has_blocking', 2000, async () => {
+      const c = await this.alarmRepo.count({
+        where: {
+          status: In([AlarmStatus.ACTIVE, AlarmStatus.ACKNOWLEDGED]),
+          severity: In([AlarmSeverity.CRITICAL, AlarmSeverity.EMERGENCY]),
+        },
+      });
+      return c > 0;
     });
-    return c > 0;
   }
 
   /**
@@ -125,6 +131,8 @@ export class AlarmsService {
         });
       }
     }
+    this.cache.invalidatePrefix('alarms:');
+    this.cache.invalidatePrefix('parking:dashboard');
   }
 
   /**
@@ -141,6 +149,8 @@ export class AlarmsService {
     alarm.acknowledgedAt = new Date();
     alarm.acknowledgeNote = dto.note ?? null;
     await this.alarmRepo.save(alarm);
+    this.cache.invalidatePrefix('alarms:');
+    this.cache.invalidatePrefix('parking:dashboard');
 
     const reloaded = await this.alarmRepo.findOne({ where: { id }, relations: ['acknowledgedByUser'] });
     const out = this.toDto(reloaded!);

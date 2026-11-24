@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { APP_CONFIG, AppConfig } from '../../config/app.config';
+import { AppCacheService } from '../../common/cache.module';
 import { AuthUser, RequestMeta } from '../../common/decorators';
 import {
   AlarmSeverity, CommandStatus, EventCategory, IN_FLIGHT_COMMAND_STATUSES, Protocol, RequestType,
@@ -51,6 +52,7 @@ export class IndustrialIntegrationService implements OnModuleInit, OnModuleDestr
     private readonly audit: AuditService,
     private readonly realtime: RealtimeGateway,
     private readonly vncBridge: VncBridgeService,
+    private readonly cache: AppCacheService,
   ) {}
 
   async onModuleInit() {
@@ -205,81 +207,83 @@ export class IndustrialIntegrationService implements OnModuleInit, OnModuleDestr
   /* ───────────────────────── Configuration Management ───────────────────────── */
 
   async getRuntimeSettings(): Promise<{ settings: IntegrationSettings; updatedAt: Date | null; updatedBy: string | null }> {
-    const row = await this.configRepo.findOne({ where: { id: 1 } });
-    const s = (row?.settings ?? {}) as Record<string, unknown>;
-    const secrets = (row?.secrets ?? {}) as Record<string, string>;
-    const dec = (field: string): string | null => {
-      const val = secrets[field];
-      if (!val) return null;
-      try {
-        return decryptSecret(val, this.cfg.encryptionKey);
-      } catch {
-        return null;
-      }
-    };
-
-    const tagMap: TagMap = {};
-    const rawTags = (row?.tagMap ?? {}) as Record<string, TagDefinition>;
-    for (const k of TAG_KEYS) {
-      const d = DEFAULT_TAG_DESCRIPTIONS[k];
-      const r = rawTags[k];
-      tagMap[k] = {
-        address: r?.address ?? '',
-        dataType: r?.dataType ?? d.dataType,
-        access: r?.access ?? d.access,
-        description: r?.description ?? d.description,
+    return this.cache.getOrSet('industrial:runtime_settings', 30_000, async () => {
+      const row = await this.configRepo.findOne({ where: { id: 1 } });
+      const s = (row?.settings ?? {}) as Record<string, unknown>;
+      const secrets = (row?.secrets ?? {}) as Record<string, string>;
+      const dec = (field: string): string | null => {
+        const val = secrets[field];
+        if (!val) return null;
+        try {
+          return decryptSecret(val, this.cfg.encryptionKey);
+        } catch {
+          return null;
+        }
       };
-    }
-    // Preserve all extended TIA Portal tags (limit switches, spots, manual controls, 2-step handshake)
-    for (const [k, r] of Object.entries(rawTags)) {
-      if (!(k in tagMap) && r && typeof r === 'object') {
+
+      const tagMap: TagMap = {};
+      const rawTags = (row?.tagMap ?? {}) as Record<string, TagDefinition>;
+      for (const k of TAG_KEYS) {
+        const d = DEFAULT_TAG_DESCRIPTIONS[k];
+        const r = rawTags[k];
         tagMap[k] = {
-          address: r.address ?? '',
-          dataType: r.dataType ?? 'BOOL',
-          access: r.access ?? 'RW',
-          description: r.description ?? k,
+          address: r?.address ?? '',
+          dataType: r?.dataType ?? d.dataType,
+          access: r?.access ?? d.access,
+          description: r?.description ?? d.description,
         };
       }
-    }
+      // Preserve all extended TIA Portal tags (limit switches, spots, manual controls, 2-step handshake)
+      for (const [k, r] of Object.entries(rawTags)) {
+        if (!(k in tagMap) && r && typeof r === 'object') {
+          tagMap[k] = {
+            address: r.address ?? '',
+            dataType: r.dataType ?? 'BOOL',
+            access: r.access ?? 'RW',
+            description: r.description ?? k,
+          };
+        }
+      }
 
-    const protocolRaw = (row?.protocol ?? this.cfg.industrial.protocol ?? 'MOCK').toUpperCase();
-    const protocol = (Object.values(Protocol).includes(protocolRaw as Protocol) ? protocolRaw : Protocol.MOCK) as Protocol;
+      const protocolRaw = (row?.protocol ?? this.cfg.industrial.protocol ?? 'MOCK').toUpperCase();
+      const protocol = (Object.values(Protocol).includes(protocolRaw as Protocol) ? protocolRaw : Protocol.MOCK) as Protocol;
 
-    return {
-      settings: {
-        protocol,
-        plcModel: (s.plcModel as string) ?? this.cfg.industrial.plcModel ?? null,
-        host: (s.host as string) ?? this.cfg.industrial.host ?? null,
-        port: (s.port as number) ?? this.cfg.industrial.port ?? null,
-        rack: (s.rack as number) ?? this.cfg.industrial.rack ?? 0,
-        slot: (s.slot as number) ?? this.cfg.industrial.slot ?? 1,
-        opcuaEndpoint: (s.opcuaEndpoint as string) ?? this.cfg.industrial.opcuaEndpoint ?? null,
-        opcuaSecurityMode: ((s.opcuaSecurityMode as 'None' | 'Sign' | 'SignAndEncrypt') ?? 'None'),
-        opcuaUsername: (s.opcuaUsername as string) ?? null,
-        opcuaPassword: dec('opcuaPassword'),
-        modbusUnitId: (s.modbusUnitId as number) ?? 1,
-        mqttUrl: (s.mqttUrl as string) ?? this.cfg.industrial.mqttUrl ?? null,
-        mqttTopicPrefix: (s.mqttTopicPrefix as string) ?? 'autopark/plc',
-        mqttUsername: (s.mqttUsername as string) ?? null,
-        mqttPassword: dec('mqttPassword'),
-        restBaseUrl: (s.restBaseUrl as string) ?? this.cfg.industrial.restBaseUrl ?? null,
-        restApiKey: dec('restApiKey'),
-        pollIntervalMs: Number(s.pollIntervalMs ?? this.cfg.industrial.pollIntervalMs),
-        ackTimeoutMs: Number(s.ackTimeoutMs ?? this.cfg.industrial.ackTimeoutMs),
-        completionTimeoutMs: Number(s.completionTimeoutMs ?? this.cfg.industrial.completionTimeoutMs),
-        heartbeatTimeoutMs: Number(s.heartbeatTimeoutMs ?? this.cfg.industrial.heartbeatTimeoutMs),
-        supportsIdempotentCommands: Boolean(s.supportsIdempotentCommands ?? false),
-        readOnly: Boolean(s.readOnly ?? false),
-        syncSpacesFromController: Boolean(s.syncSpacesFromController ?? false),
-        alarmDefinitions:
-          Array.isArray(s.alarmDefinitions) && s.alarmDefinitions.length > 0
-            ? (s.alarmDefinitions as IntegrationSettings['alarmDefinitions'])
-            : DEFAULT_PLC_ALARM_DEFINITIONS,
-        tagMap,
-      },
-      updatedAt: row?.updatedAt ?? null,
-      updatedBy: row?.updatedBy ?? null,
-    };
+      return {
+        settings: {
+          protocol,
+          plcModel: (s.plcModel as string) ?? this.cfg.industrial.plcModel ?? null,
+          host: (s.host as string) ?? this.cfg.industrial.host ?? null,
+          port: (s.port as number) ?? this.cfg.industrial.port ?? null,
+          rack: (s.rack as number) ?? this.cfg.industrial.rack ?? 0,
+          slot: (s.slot as number) ?? this.cfg.industrial.slot ?? 1,
+          opcuaEndpoint: (s.opcuaEndpoint as string) ?? this.cfg.industrial.opcuaEndpoint ?? null,
+          opcuaSecurityMode: ((s.opcuaSecurityMode as 'None' | 'Sign' | 'SignAndEncrypt') ?? 'None'),
+          opcuaUsername: (s.opcuaUsername as string) ?? null,
+          opcuaPassword: dec('opcuaPassword'),
+          modbusUnitId: (s.modbusUnitId as number) ?? 1,
+          mqttUrl: (s.mqttUrl as string) ?? this.cfg.industrial.mqttUrl ?? null,
+          mqttTopicPrefix: (s.mqttTopicPrefix as string) ?? 'autopark/plc',
+          mqttUsername: (s.mqttUsername as string) ?? null,
+          mqttPassword: dec('mqttPassword'),
+          restBaseUrl: (s.restBaseUrl as string) ?? this.cfg.industrial.restBaseUrl ?? null,
+          restApiKey: dec('restApiKey'),
+          pollIntervalMs: Number(s.pollIntervalMs ?? this.cfg.industrial.pollIntervalMs),
+          ackTimeoutMs: Number(s.ackTimeoutMs ?? this.cfg.industrial.ackTimeoutMs),
+          completionTimeoutMs: Number(s.completionTimeoutMs ?? this.cfg.industrial.completionTimeoutMs),
+          heartbeatTimeoutMs: Number(s.heartbeatTimeoutMs ?? this.cfg.industrial.heartbeatTimeoutMs),
+          supportsIdempotentCommands: Boolean(s.supportsIdempotentCommands ?? false),
+          readOnly: Boolean(s.readOnly ?? false),
+          syncSpacesFromController: Boolean(s.syncSpacesFromController ?? false),
+          alarmDefinitions:
+            Array.isArray(s.alarmDefinitions) && s.alarmDefinitions.length > 0
+              ? (s.alarmDefinitions as IntegrationSettings['alarmDefinitions'])
+              : DEFAULT_PLC_ALARM_DEFINITIONS,
+          tagMap,
+        },
+        updatedAt: row?.updatedAt ?? null,
+        updatedBy: row?.updatedBy ?? null,
+      };
+    });
   }
 
   async getPublicConfig() {
@@ -376,6 +380,7 @@ export class IndustrialIntegrationService implements OnModuleInit, OnModuleDestr
     }
     row.updatedBy = user.username;
     await this.configRepo.save(row);
+    this.cache.invalidatePrefix('industrial:');
 
     await this.audit.log({
       userId: user.id,
