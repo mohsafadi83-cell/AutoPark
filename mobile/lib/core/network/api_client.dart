@@ -303,6 +303,7 @@ class ApiClient {
     String? vehicleId,
     String? plateNumber,
     bool? isOtherVehicle,
+    String? targetSpaceNumber,
   }) =>
       _guard(() async {
         final r = await _dio.post<Map<String, dynamic>>(
@@ -313,6 +314,8 @@ class ApiClient {
             if (plateNumber != null && plateNumber.isNotEmpty)
               'plateNumber': plateNumber.trim().toUpperCase(),
             if (isOtherVehicle != null) 'isOtherVehicle': isOtherVehicle,
+            if (targetSpaceNumber != null && targetSpaceNumber.isNotEmpty)
+              'targetSpaceNumber': targetSpaceNumber.trim().toUpperCase(),
           },
         );
         return ParkingRequest.fromJson(r.data!);
@@ -321,6 +324,7 @@ class ApiClient {
   Future<ParkingRequest> requestRetrieve({
     String? vehicleId,
     String? plateNumber,
+    String? targetSpaceNumber,
   }) =>
       _guard(() async {
         final r = await _dio.post<Map<String, dynamic>>(
@@ -330,6 +334,8 @@ class ApiClient {
               'vehicleId': vehicleId,
             if (plateNumber != null && plateNumber.isNotEmpty)
               'plateNumber': plateNumber.trim().toUpperCase(),
+            if (targetSpaceNumber != null && targetSpaceNumber.isNotEmpty)
+              'targetSpaceNumber': targetSpaceNumber.trim().toUpperCase(),
           },
         );
         return ParkingRequest.fromJson(r.data!);

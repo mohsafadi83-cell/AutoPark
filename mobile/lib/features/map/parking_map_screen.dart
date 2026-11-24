@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/models.dart';
+import '../../core/network/api_error.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/alarm_severity_badge.dart';
@@ -351,69 +352,272 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
     final cat = space.resolveColorCategory(viewer);
     final catColor = _colorForCategory(cat);
     final catLabel = _labelForCategory(cat, isAr);
+    final appState = ref.read(appControllerProvider);
+    final vehicles = appState.vehicles;
+
+    String? selectedVehicleId = vehicles.isNotEmpty ? vehicles.first.id : null;
+    final plateCtrl = TextEditingController();
+    bool submitting = false;
+
     showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    l10n.spaceDetailsTitle(space.spaceNumber),
-                    style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final isAvailable = space.status == SpaceStatus.available;
+          final isOccupied = space.status == SpaceStatus.occupied;
+
+          Future<void> dispatchMove({required bool isPark}) async {
+            final manualPlate = plateCtrl.text.trim().toUpperCase();
+            final useManual = manualPlate.isNotEmpty;
+            if (isPark && !useManual && (selectedVehicleId == null || selectedVehicleId!.isEmpty)) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    isAr
+                        ? 'اختر مركبة أو أدخل رقم اللوحة أولاً'
+                        : 'Select a vehicle or enter a plate number first',
+                  ),
+                ),
+              );
+              return;
+            }
+            setSheetState(() => submitting = true);
+            try {
+              final api = ref.read(appControllerProvider.notifier).api;
+              final req = isPark
+                  ? await api.requestPark(
+                      vehicleId: useManual ? null : selectedVehicleId,
+                      plateNumber: useManual ? manualPlate : null,
+                      targetSpaceNumber: space.spaceNumber,
+                    )
+                  : await api.requestRetrieve(
+                      plateNumber: space.vehiclePlate,
+                      targetSpaceNumber: space.spaceNumber,
+                    );
+              ref.read(appControllerProvider.notifier).upsertRequest(req);
+              await ref.read(appControllerProvider.notifier).refreshAllData();
+              if (ctx.mounted) Navigator.of(ctx).pop();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    backgroundColor: const Color(0xFF16A34A),
+                    content: Text(
+                      isPark
+                          ? (isAr
+                              ? '✅ تم إرسال أمر الإيداع وتحريك المصعد إلى ${space.spaceNumber}'
+                              : '✅ Park & lift move dispatched to ${space.spaceNumber}')
+                          : (isAr
+                              ? '✅ تم إرسال أمر الاسترجاع وتحريك المصعد من ${space.spaceNumber}'
+                              : '✅ Retrieve & lift move dispatched from ${space.spaceNumber}'),
+                    ),
+                  ),
+                );
+              }
+            } on ApiError catch (e) {
+              setSheetState(() => submitting = false);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    backgroundColor: AppColors.statusError,
+                    content: Text(e.localizedMessage(l10n)),
+                  ),
+                );
+              }
+            } catch (e) {
+              setSheetState(() => submitting = false);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    backgroundColor: AppColors.statusError,
+                    content: Text(e.toString()),
+                  ),
+                );
+              }
+            }
+          }
+
+          return SafeArea(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                20,
+                20,
+                20 + MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          l10n.spaceDetailsTitle(space.spaceNumber),
+                          style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
                         ),
-                  ),
-                  SpaceStatusBadge(status: space.status),
-                ],
+                        SpaceStatusBadge(status: space.status),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: catColor.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: catColor.withOpacity(0.7)),
+                        ),
+                        child: Text(
+                          catLabel,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: catColor,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      '${l10n.levelLabel(space.level)} • ${l10n.zoneLabel(space.zone)}',
+                    ),
+                    if (space.vehiclePlate != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        '${l10n.plateNumber}: ${space.vehiclePlate}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.primaryCyan,
+                        ),
+                      ),
+                    ],
+                    if (space.parkedByUsername != null &&
+                        space.parkedByUsername!.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        isAr
+                            ? 'تم التحريك بواسطة: ${space.parkedByUsername}'
+                            : 'Moved by: ${space.parkedByUsername}',
+                        style: const TextStyle(fontSize: 12.5),
+                      ),
+                    ],
+                    if (isAvailable) ...[
+                      const SizedBox(height: 16),
+                      const Divider(),
+                      const SizedBox(height: 8),
+                      if (vehicles.isNotEmpty) ...[
+                        DropdownButtonFormField<String>(
+                          value: selectedVehicleId,
+                          decoration: InputDecoration(
+                            labelText: isAr
+                                ? 'اختر مركبة مسجلة'
+                                : 'Select Registered Vehicle',
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                          ),
+                          items: [
+                            for (final v in vehicles)
+                              DropdownMenuItem(
+                                value: v.id,
+                                child: Text(v.displayName),
+                              ),
+                          ],
+                          onChanged: submitting
+                              ? null
+                              : (val) =>
+                                  setSheetState(() => selectedVehicleId = val),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      TextField(
+                        controller: plateCtrl,
+                        enabled: !submitting,
+                        textCapitalization: TextCapitalization.characters,
+                        decoration: InputDecoration(
+                          labelText: isAr
+                              ? 'أو أدخل رقم اللوحة يدوياً (اختياري)'
+                              : 'Or enter plate number manually (optional)',
+                          hintText: '10-45821',
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF16A34A),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                        ),
+                        onPressed: submitting
+                            ? null
+                            : () => dispatchMove(isPark: true),
+                        icon: submitting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.local_parking_rounded),
+                        label: Text(
+                          isAr
+                              ? 'إيداع وتحريك المصعد إلى ${space.spaceNumber}'
+                              : 'Park & Move Lift to ${space.spaceNumber}',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ],
+                    if (isOccupied) ...[
+                      const SizedBox(height: 16),
+                      const Divider(),
+                      const SizedBox(height: 10),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primaryCyan,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                        ),
+                        onPressed: submitting
+                            ? null
+                            : () => dispatchMove(isPark: false),
+                        icon: submitting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.directions_car_rounded),
+                        label: Text(
+                          isAr
+                              ? 'استرجاع وتحريك المصعد من ${space.spaceNumber}'
+                              : 'Retrieve & Move Lift from ${space.spaceNumber}',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: catColor.withOpacity(0.18),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: catColor.withOpacity(0.7)),
-                ),
-                child: Text(
-                  catLabel,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: catColor,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                '${l10n.levelLabel(space.level)} • ${l10n.zoneLabel(space.zone)}',
-              ),
-              if (space.vehiclePlate != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  '${l10n.plateNumber}: ${space.vehiclePlate}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.primaryCyan,
-                  ),
-                ),
-              ],
-              if (space.parkedByUsername != null && space.parkedByUsername!.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  isAr
-                      ? 'تم التحريك بواسطة: ${space.parkedByUsername}'
-                      : 'Moved by: ${space.parkedByUsername}',
-                  style: const TextStyle(fontSize: 12.5),
-                ),
-              ],
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
