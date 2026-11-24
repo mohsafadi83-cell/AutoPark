@@ -39,6 +39,37 @@ namespace AutoPark
         readonly Label[] _inLeds = new Label[32];
         readonly Label[] _outLeds = new Label[32];
         readonly Label[] _dbBitChips;
+
+        // Section 5: Live Data Block Registers (ParkIO_Data [DB1] & ParkDB [DB2])
+        readonly Label[] _db1ByteCells = new Label[4];
+        readonly Label[] _db1BitCells = new Label[25];
+        readonly Label[] _db2ByteCells = new Label[12];
+        readonly Label[] _db2NamedCells = new Label[14];
+        readonly Label _lblDbSummary;
+
+        readonly string[] _db1Names = new string[]
+        {
+            "FAULT_DB\n0.0", "EMG_DB\n0.1", "PFAIL_DB\n0.2", "Auto_DB\n0.3", "AutoOK_DB\n0.4",
+            "Manual_DB\n0.5", "ManualOK\n0.6", "PCELL_in\n0.7", "PCELL_out\n1.0", "Man_Pump\n1.1",
+            "Man_Wall\n1.2", "Man_Up\n1.3", "Man_Down\n1.4", "Man_Cutoff\n1.5", "Man_L1\n1.6",
+            "Man_L2\n1.7", "Man_L3\n2.0", "Man_L4\n2.1", "Man_LQ1\n2.2", "Man_LQ2\n2.3",
+            "Man_LQ3\n2.4", "Man_LQ4\n2.5", "User_Logoff\n2.6", "Sim Manual\n2.7", "wall_sim\n3.0"
+        };
+
+        readonly string[] _db2Names = new string[]
+        {
+            "Step1_Ready\n5.4", "Step1_Done\n5.5", "Step2_Ready\n5.6", "Step2_Done\n5.7",
+            "Step1_OK\n6.0", "Step2_OK\n6.1", "Auto_NoProg\n6.2",
+            "Park_IN\n6.3", "Park_OUT\n6.4", "Alarm Word\nDB2,W8", "Reset\n10.0",
+            "Period_Maint\n10.1", "New_Maint\n10.2", "Wall_valve\n10.3"
+        };
+        readonly int[] _db2Offsets = new int[]
+        {
+            5 * 8 + 4, 5 * 8 + 5, 5 * 8 + 6, 5 * 8 + 7,
+            6 * 8 + 0, 6 * 8 + 1, 6 * 8 + 2,
+            6 * 8 + 3, 6 * 8 + 4, -8, 10 * 8 + 0,
+            10 * 8 + 1, 10 * 8 + 2, 10 * 8 + 3
+        };
         readonly string[] _dbBitKeys = new string[]
         {
             "auto_mode_tag", "manual_mode_tag", "manual_ok_tag", "man_pump_tag",
@@ -388,6 +419,135 @@ namespace AutoPark
             ioCard.Controls.Add(ioTitle);
             body.Controls.Add(ioCard);
 
+            // ─── 6. Card E: Live Data Block Registers — ParkIO_Data [DB1] & ParkDB [DB2] ───
+            var dbRegCard = new Card { Width = 1140, Height = 530, Padding = new Padding(16, 12, 16, 12), Margin = new Padding(0, 0, 0, 14) };
+            var dbRegTitle = Theme.Label(
+                Loc.T("5. Live PLC Data Block Registers — ParkIO_Data [DB1] (DB1.DBB0–DBB3) & ParkDB [DB2] (DB2.DBB0–DBB11, DB2.DBW8)",
+                      "5. سجلات كتل البيانات الحية — ParkIO_Data [DB1] (DBB0–DBB3) و ParkDB [DB2] (DBB0–DBB11 و DBW8)"),
+                Theme.Bold(10.8f), Theme.Ink);
+            dbRegTitle.UseMnemonic = false;
+            dbRegTitle.Dock = DockStyle.Top;
+            dbRegTitle.Height = 26;
+
+            _lblDbSummary = Theme.Label("DB1=[—]   |   DB2=[—]   |   DB2.DBW8 (Alarm Word)=—", Theme.Semi(9f), Theme.Muted);
+            _lblDbSummary.Dock = DockStyle.Top;
+            _lblDbSummary.Height = 22;
+
+            var dbRegBody = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 4, 0, 0) };
+
+            // DB1 Byte Strip (DB1.DBB0 .. DB1.DBB3)
+            var db1ByteLbl = Theme.Label(Loc.T("ParkIO_Data [DB1] Raw Byte Registers (DB1.DBB0–DB1.DBB3):", "سجلات البايت الخام DB1 (DB1.DBB0–DB1.DBB3):"), Theme.Bold(8.8f), Theme.Primary);
+            db1ByteLbl.Dock = DockStyle.Top;
+            db1ByteLbl.Height = 18;
+
+            var db1ByteGrid = new TableLayoutPanel { Dock = DockStyle.Top, Height = 44, ColumnCount = 4, RowCount = 1, RightToLeft = RightToLeft.No };
+            for (int c = 0; c < 4; c++)
+            {
+                db1ByteGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+                var cell = new Label
+                {
+                    Text = "DB1.DBB" + c + "\n—",
+                    Font = new Font("Consolas", 8.5f, FontStyle.Bold),
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    Dock = DockStyle.Fill,
+                    Margin = new Padding(2),
+                    BackColor = Theme.Back,
+                    ForeColor = Theme.Muted,
+                    BorderStyle = BorderStyle.FixedSingle
+                };
+                _db1ByteCells[c] = cell;
+                db1ByteGrid.Controls.Add(cell, c, 0);
+            }
+
+            // DB1 All 25 Named Bit Registers (5 rows x 5 cols)
+            var db1BitLbl = Theme.Label(Loc.T("ParkIO_Data [DB1] All 25 Verified Bit Registers (DB1.DBX0.0 – DB1.DBX3.0):", "جميع بتات DB1 الـ 25 المعتمدة (DB1.DBX0.0 – DB1.DBX3.0):"), Theme.Bold(8.8f), Theme.Ink);
+            db1BitLbl.Dock = DockStyle.Top;
+            db1BitLbl.Height = 20;
+
+            var db1BitGrid = new TableLayoutPanel { Dock = DockStyle.Top, Height = 165, ColumnCount = 5, RowCount = 5, RightToLeft = RightToLeft.No };
+            for (int c = 0; c < 5; c++) db1BitGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20f));
+            for (int r = 0; r < 5; r++) db1BitGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 20f));
+            for (int i = 0; i < 25; i++)
+            {
+                var cell = new Label
+                {
+                    Text = _db1Names[i] + " : —",
+                    Font = Theme.Semi(8f),
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    Dock = DockStyle.Fill,
+                    Margin = new Padding(2),
+                    BackColor = Theme.Back,
+                    ForeColor = Theme.Muted,
+                    BorderStyle = BorderStyle.FixedSingle
+                };
+                _db1BitCells[i] = cell;
+                db1BitGrid.Controls.Add(cell, i % 5, i / 5);
+            }
+
+            // DB2 Byte Strip (DB2.DBB0 .. DB2.DBB11)
+            var db2ByteLbl = Theme.Label(Loc.T("ParkDB [DB2] Raw Byte Registers (DB2.DBB0–DB2.DBB11):", "سجلات البايت الخام DB2 (DB2.DBB0–DB2.DBB11):"), Theme.Bold(8.8f), Theme.Blue);
+            db2ByteLbl.Dock = DockStyle.Top;
+            db2ByteLbl.Height = 20;
+
+            var db2ByteGrid = new TableLayoutPanel { Dock = DockStyle.Top, Height = 46, ColumnCount = 12, RowCount = 1, RightToLeft = RightToLeft.No };
+            for (int c = 0; c < 12; c++)
+            {
+                db2ByteGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 12f));
+                var cell = new Label
+                {
+                    Text = "DBB" + c + "\n—",
+                    Font = new Font("Consolas", 8f, FontStyle.Bold),
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    Dock = DockStyle.Fill,
+                    Margin = new Padding(1),
+                    BackColor = Theme.Back,
+                    ForeColor = Theme.Muted,
+                    BorderStyle = BorderStyle.FixedSingle
+                };
+                _db2ByteCells[c] = cell;
+                db2ByteGrid.Controls.Add(cell, c, 0);
+            }
+
+            // DB2 All 14 Verified Named Registers (2 rows x 7 cols)
+            var db2BitLbl = Theme.Label(Loc.T("ParkDB [DB2] Verified Handshake, Alarm Word & Maintenance Registers (5.4 – 10.3):", "سجلات ParkDB [DB2] المعتمدة للتشغيل التلقائي والإنذار والصيانة (5.4 – 10.3):"), Theme.Bold(8.8f), Theme.Ink);
+            db2BitLbl.Dock = DockStyle.Top;
+            db2BitLbl.Height = 20;
+
+            var db2BitGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 7, RowCount = 2, RightToLeft = RightToLeft.No };
+            for (int c = 0; c < 7; c++) db2BitGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 7f));
+            for (int r = 0; r < 2; r++) db2BitGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
+            for (int i = 0; i < 14; i++)
+            {
+                var cell = new Label
+                {
+                    Text = _db2Names[i] + "\n—",
+                    Font = Theme.Semi(8f),
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    Dock = DockStyle.Fill,
+                    Margin = new Padding(2),
+                    BackColor = Theme.Back,
+                    ForeColor = Theme.Muted,
+                    BorderStyle = BorderStyle.FixedSingle
+                };
+                _db2NamedCells[i] = cell;
+                db2BitGrid.Controls.Add(cell, i % 7, i / 7);
+            }
+
+            // DockStyle.Top adds in reverse order (last added appears at top)
+            dbRegBody.Controls.Add(db2BitGrid);
+            dbRegBody.Controls.Add(db2BitLbl);
+            dbRegBody.Controls.Add(db2ByteGrid);
+            dbRegBody.Controls.Add(db2ByteLbl);
+            dbRegBody.Controls.Add(db1BitGrid);
+            dbRegBody.Controls.Add(db1BitLbl);
+            dbRegBody.Controls.Add(db1ByteGrid);
+            dbRegBody.Controls.Add(db1ByteLbl);
+
+            dbRegCard.Controls.Add(dbRegBody);
+            dbRegCard.Controls.Add(_lblDbSummary);
+            dbRegCard.Controls.Add(dbRegTitle);
+            body.Controls.Add(dbRegCard);
+
             Controls.Add(body);
 
             Resize += delegate
@@ -399,6 +559,7 @@ namespace AutoPark
                 safetyCard.Width = w;
                 laneCard.Width = w;
                 ioCard.Width = w;
+                dbRegCard.Width = w;
             };
 
             _autoTimer = new System.Windows.Forms.Timer { Interval = 3000 };
@@ -773,6 +934,86 @@ namespace AutoPark
                     _dbBitChips[i].ForeColor = Theme.Ink;
                 }
             }
+
+            // Section 5: Live Data Block Registers (ParkIO_Data [DB1] & ParkDB [DB2])
+            int[] db1 = ExtractJsonIntArray(liveS7Json, "DB1", 4);
+            int[] db2 = ExtractJsonIntArray(liveS7Json, "DB2", 12);
+            bool hasDb1 = db1 != null;
+            bool hasDb2 = db2 != null;
+            int db2Word8 = hasDb2 ? ((db2[8] & 0xFF) << 8) | (db2[9] & 0xFF) : 0;
+
+            _lblDbSummary.Text = string.Format(
+                "DB1=[{0}]   |   DB2=[{1}]   |   DB2.DBW8 (Alarm Word)={2}",
+                hasDb1 ? string.Join(",", Array.ConvertAll(db1, delegate (int x) { return x.ToString(); })) : "—",
+                hasDb2 ? string.Join(",", Array.ConvertAll(db2, delegate (int x) { return x.ToString(); })) : "—",
+                hasDb2 ? db2Word8.ToString() : "—");
+
+            for (int c = 0; c < 4; c++)
+            {
+                if (!hasDb1)
+                {
+                    SetCell(_db1ByteCells[c], "DB1.DBB" + c + "\n—", Theme.Back, Theme.Muted);
+                }
+                else
+                {
+                    int bVal = db1[c] & 0xFF;
+                    string bin = Convert.ToString(bVal, 2).PadLeft(8, '0');
+                    string txt = string.Format("DB1.DBB{0} = {1} (0x{2:X2})\n{3}", c, bVal, bVal, bin);
+                    SetCell(_db1ByteCells[c], txt, bVal != 0 ? Theme.PrimarySoft : Theme.Surface, bVal != 0 ? Theme.Primary : Theme.Ink);
+                }
+            }
+
+            for (int i = 0; i < 25; i++)
+            {
+                if (!hasDb1)
+                {
+                    SetCell(_db1BitCells[i], _db1Names[i] + " : —", Theme.Back, Theme.Muted);
+                }
+                else
+                {
+                    int byteIdx = i / 8;
+                    int bitIdx = i % 8;
+                    bool on = ((db1[byteIdx] >> bitIdx) & 1) != 0;
+                    SetCell(_db1BitCells[i], _db1Names[i] + " : " + (on ? "ON" : "OFF"),
+                        on ? Theme.OkSoft : Theme.Surface, on ? Theme.Ok : Theme.Ink);
+                }
+            }
+
+            for (int c = 0; c < 12; c++)
+            {
+                if (!hasDb2)
+                {
+                    SetCell(_db2ByteCells[c], "DBB" + c + "\n—", Theme.Back, Theme.Muted);
+                }
+                else
+                {
+                    int bVal = db2[c] & 0xFF;
+                    string txt = string.Format("DBB{0}\n{1} (0x{2:X2})", c, bVal, bVal);
+                    SetCell(_db2ByteCells[c], txt, bVal != 0 ? Theme.BlueSoft : Theme.Surface, bVal != 0 ? Theme.Blue : Theme.Ink);
+                }
+            }
+
+            for (int i = 0; i < 14; i++)
+            {
+                if (!hasDb2)
+                {
+                    SetCell(_db2NamedCells[i], _db2Names[i] + "\n—", Theme.Back, Theme.Muted);
+                }
+                else if (_db2Offsets[i] == -8)
+                {
+                    // DB2.DBW8 (Alarm Word UInt)
+                    SetCell(_db2NamedCells[i], _db2Names[i] + "\n" + db2Word8 + " (0x" + db2Word8.ToString("X4") + ")",
+                        db2Word8 != 0 ? Theme.ErrSoft : Theme.OkSoft, db2Word8 != 0 ? Theme.Err : Theme.Ok);
+                }
+                else
+                {
+                    int byteIdx = _db2Offsets[i] / 8;
+                    int bitIdx = _db2Offsets[i] % 8;
+                    bool on = ((db2[byteIdx] >> bitIdx) & 1) != 0;
+                    SetCell(_db2NamedCells[i], _db2Names[i] + "\n" + (on ? "ON (1)" : "OFF (0)"),
+                        on ? Theme.OkSoft : Theme.Surface, on ? Theme.Ok : Theme.Ink);
+                }
+            }
         }
 
         void UpdateLedBytes(Label[] leds, int[] bytes, Color onBg, Color onFg)
@@ -923,6 +1164,23 @@ namespace AutoPark
             var m = Regex.Match(json, "\"" + key + "\"\\s*:\\s*(-?\\d+)");
             int val;
             return (m.Success && int.TryParse(m.Groups[1].Value, out val)) ? val : fallback;
+        }
+
+        static int[] ExtractJsonIntArray(string json, string key, int expectedLen)
+        {
+            if (string.IsNullOrEmpty(json)) return null;
+            var m = Regex.Match(json, "\"" + key + "\"\\s*:\\s*\\[([^\\]]*)\\]");
+            if (!m.Success) return null;
+            string inner = m.Groups[1].Value.Trim();
+            if (inner.Length == 0) return null;
+            string[] parts = inner.Split(',');
+            int[] res = new int[expectedLen];
+            for (int i = 0; i < expectedLen && i < parts.Length; i++)
+            {
+                int v;
+                if (int.TryParse(parts[i].Trim(), out v)) res[i] = v;
+            }
+            return res;
         }
 
         protected override void Dispose(bool disposing)
