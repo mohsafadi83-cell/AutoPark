@@ -60,12 +60,14 @@ export async function createConfiguredApp() {
   ];
   const mobileDir = candidateMobileDirs.find((d) => fs.existsSync(path.join(d, 'index.html')));
   if (mobileDir) {
+    // Cache transformed mobile index.html in memory once at startup (avoids sync disk I/O per request)
+    const cachedMobileHtml = fs
+      .readFileSync(path.join(mobileDir, 'index.html'), 'utf8')
+      .replace(/<base\s+href="[^"]*">/i, '<base href="/mobile/">');
     const sendMobileIndex = (_req: express.Request, res: express.Response) => {
-      const html = fs
-        .readFileSync(path.join(mobileDir, 'index.html'), 'utf8')
-        .replace(/<base\s+href="[^"]*">/i, '<base href="/mobile/">');
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.send(html);
+      res.setHeader('Cache-Control', 'no-cache');
+      res.send(cachedMobileHtml);
     };
     expressApp.get('/mobile', (req, res) => {
       if (req.originalUrl === '/mobile' || req.originalUrl.startsWith('/mobile?')) {
@@ -73,7 +75,7 @@ export async function createConfiguredApp() {
       }
       return sendMobileIndex(req, res);
     });
-    expressApp.use('/mobile', express.static(mobileDir, { index: false }));
+    expressApp.use('/mobile', express.static(mobileDir, { index: false, maxAge: '7d' }));
     expressApp.get('/mobile/*', sendMobileIndex);
   }
 
@@ -83,7 +85,7 @@ export async function createConfiguredApp() {
   ];
   const adminDir = candidateAdminDirs.find((d) => fs.existsSync(path.join(d, 'index.html')));
   if (adminDir) {
-    expressApp.use(express.static(adminDir));
+    expressApp.use(express.static(adminDir, { maxAge: '7d', index: false }));
     expressApp.get('*', (req, res, next) => {
       if (
         req.path.startsWith('/api') ||

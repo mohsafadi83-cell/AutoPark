@@ -4,6 +4,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsBoolean, IsOptional, IsString } from 'class-validator';
 import { Repository } from 'typeorm';
+import { AppCacheService } from '../../common/cache.module';
 import {
   AuthUser, CurrentUser, ReqMeta, RequestMeta, RequirePermissions,
 } from '../../common/decorators';
@@ -64,16 +65,19 @@ export class DevicesService {
     @InjectRepository(RefreshTokenEntity) private readonly rtRepo: Repository<RefreshTokenEntity>,
     @InjectRepository(IntegrationConfigEntity) private readonly configRepo: Repository<IntegrationConfigEntity>,
     private readonly audit: AuditService,
+    private readonly cache: AppCacheService,
   ) {}
 
   async getEnforceWhitelist(): Promise<boolean> {
-    const row = await this.configRepo.findOne({ where: { id: 1 } });
-    const s = (row?.settings ?? {}) as Record<string, unknown>;
-    if (typeof s.enforceDeviceWhitelist === 'boolean') {
-      return s.enforceDeviceWhitelist;
-    }
-    // Strict default: ONLY registered employee phones are allowed to access via the mobile app!
-    return true;
+    return this.cache.getOrSet('devices:policy', 30_000, async () => {
+      const row = await this.configRepo.findOne({ where: { id: 1 } });
+      const s = (row?.settings ?? {}) as Record<string, unknown>;
+      if (typeof s.enforceDeviceWhitelist === 'boolean') {
+        return s.enforceDeviceWhitelist;
+      }
+      // Strict default: ONLY registered employee phones are allowed to access via the mobile app!
+      return true;
+    });
   }
 
   async setEnforceWhitelist(enforce: boolean, admin: AuthUser, meta: RequestMeta) {
@@ -84,6 +88,8 @@ export class DevicesService {
     row.settings = { ...(row.settings ?? {}), enforceDeviceWhitelist: Boolean(enforce) };
     row.updatedBy = admin.username;
     await this.configRepo.save(row);
+    this.cache.invalidatePrefix('devices:');
+    this.cache.invalidatePrefix('industrial:');
 
     await this.audit.log({
       userId: admin.id,
@@ -98,14 +104,16 @@ export class DevicesService {
   }
 
   async listDevices() {
-    const [items, enforceWhitelist] = await Promise.all([
-      this.repo.find({ order: { createdAt: 'DESC' } }),
-      this.getEnforceWhitelist(),
-    ]);
-    return {
-      enforceWhitelist,
-      items: items.map((d) => this.toDto(d)),
-    };
+    return this.cache.getOrSet('devices:list', 10_000, async () => {
+      const [items, enforceWhitelist] = await Promise.all([
+        this.repo.find({ order: { createdAt: 'DESC' } }),
+        this.getEnforceWhitelist(),
+      ]);
+      return {
+        enforceWhitelist,
+        items: items.map((d) => this.toDto(d)),
+      };
+    });
   }
 
   async registerDevice(dto: RegisterDeviceDto, admin: AuthUser, meta: RequestMeta) {
@@ -148,6 +156,7 @@ export class DevicesService {
       revokedAt: null,
       lastSeenAt: null,
     });
+    this.cache.invalidatePrefix('devices:');
 
     await this.audit.log({
       userId: admin.id,
@@ -224,6 +233,7 @@ export class DevicesService {
     }
 
     const saved = await this.repo.save(dev);
+    this.cache.invalidatePrefix('devices:');
 
     await this.audit.log({
       userId: admin.id,
@@ -276,9 +286,13 @@ export class DevicesService {
         if (dto.disableUserAccount) {
           linkedUser.status = UserStatus.DISABLED;
           await this.usersRepo.save(linkedUser);
+          this.cache.delete(`auth:user:${linkedUser.id}`);
+          this.cache.delete(`auth:me:${linkedUser.id}`);
+          this.cache.invalidatePrefix('users:');
         }
       }
     }
+    this.cache.invalidatePrefix('devices:');
 
     await this.audit.log({
       userId: admin.id,
@@ -317,8 +331,12 @@ export class DevicesService {
       if (linkedUser && linkedUser.status === UserStatus.DISABLED) {
         linkedUser.status = UserStatus.ACTIVE;
         await this.usersRepo.save(linkedUser);
+        this.cache.delete(`auth:user:${linkedUser.id}`);
+        this.cache.delete(`auth:me:${linkedUser.id}`);
+        this.cache.invalidatePrefix('users:');
       }
     }
+    this.cache.invalidatePrefix('devices:');
 
     await this.audit.log({
       userId: admin.id,
@@ -338,6 +356,7 @@ export class DevicesService {
     const dev = await this.repo.findOne({ where: { id } });
     if (!dev) throw AppError.notFound('Authorized device');
     await this.repo.remove(dev);
+    this.cache.invalidatePrefix('devices:');
 
     await this.audit.log({
       userId: admin.id,

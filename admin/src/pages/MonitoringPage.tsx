@@ -1,4 +1,5 @@
 import {
+  Bolt as CacheIcon,
   DeleteSweep as ClearIcon,
   Pause as PauseIcon,
   PlayArrow as ResumeIcon,
@@ -17,22 +18,42 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { industrialApi } from '../api/endpoints';
+import { industrialApi, systemApi } from '../api/endpoints';
 import { errorMessage } from '../api/errors';
 import { MachineStateBadge, SystemStateBadge } from '../components/StatusBadges';
+import { useAuth } from '../context/AuthContext';
 import { useRealtime } from '../context/RealtimeContext';
+import { useToast } from '../context/ToastContext';
 
 export const MonitoringPage: React.FC = () => {
   const { t } = useTranslation();
+  const { can } = useAuth();
+  const { notify } = useToast();
+  const queryClient = useQueryClient();
   const { feed, paused, setPaused, clearFeed, movingVehicles, lastHeartbeat } = useRealtime();
 
   const statusQuery = useQuery({
     queryKey: ['industrialStatus'],
     queryFn: () => industrialApi.status(),
     refetchInterval: 5000,
+  });
+
+  const cacheQuery = useQuery({
+    queryKey: ['cacheStats'],
+    queryFn: () => systemApi.cacheStats(),
+    refetchInterval: 5000,
+  });
+
+  const flushCacheMutation = useMutation({
+    mutationFn: () => systemApi.flushCache(),
+    onSuccess: (res) => {
+      notify(`Cache flushed (${res.flushedEntries} entries cleared)`, 'info');
+      void queryClient.invalidateQueries({ queryKey: ['cacheStats'] });
+    },
+    onError: (err) => notify(errorMessage(err, t), 'error'),
   });
 
   if (statusQuery.isLoading) {
@@ -158,6 +179,104 @@ export const MonitoringPage: React.FC = () => {
           </Typography>
         </Stack>
       </Paper>
+
+      {/* Database Read-Through Cache Telemetry Card */}
+      {cacheQuery.data && (
+        <Paper sx={{ p: 2.5 }}>
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            justifyContent="space-between"
+            alignItems={{ sm: 'center' }}
+            spacing={1.5}
+            sx={{ mb: 1.5 }}
+          >
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+              <CacheIcon color="primary" />
+              <Typography variant="subtitle1" fontWeight={700}>
+                Database Cache Performance
+              </Typography>
+              <Chip
+                size="small"
+                color={cacheQuery.data.redisConnected ? 'success' : 'primary'}
+                variant="outlined"
+                label={
+                  cacheQuery.data.redisConnected
+                    ? 'Redis L2 + Memory L1'
+                    : cacheQuery.data.redisConfigured
+                      ? 'Memory L1 (Redis Standby)'
+                      : 'In-Memory LRU L1'
+                }
+              />
+              <Chip
+                size="small"
+                color={cacheQuery.data.hitRatePct >= 60 ? 'success' : 'default'}
+                label={`Hit Rate: ${cacheQuery.data.hitRatePct}%`}
+              />
+            </Stack>
+            <Stack direction="row" spacing={1}>
+              <Button size="small" variant="outlined" startIcon={<RefreshIcon />} onClick={() => void cacheQuery.refetch()}>
+                {t('common.refresh')}
+              </Button>
+              {can('config.manage') && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="warning"
+                  startIcon={<ClearIcon />}
+                  disabled={flushCacheMutation.isPending}
+                  onClick={() => flushCacheMutation.mutate()}
+                >
+                  Flush Cache
+                </Button>
+              )}
+            </Stack>
+          </Stack>
+
+          <LinearProgress
+            variant="determinate"
+            value={Math.min(100, Math.max(0, cacheQuery.data.hitRatePct))}
+            color={cacheQuery.data.hitRatePct >= 60 ? 'success' : 'primary'}
+            sx={{ height: 8, borderRadius: 4, mb: 2 }}
+          />
+
+          <Grid container spacing={2} sx={{ mb: 1.5 }}>
+            {[
+              { label: 'Cache Hits (DB Saved)', value: cacheQuery.data.hits, color: 'success.main' },
+              { label: 'Cache Misses (DB Reads)', value: cacheQuery.data.misses, color: 'text.primary' },
+              { label: 'Stampede Deduped', value: cacheQuery.data.dedupedInFlight, color: 'primary.main' },
+              {
+                label: 'Active Entries',
+                value: `${cacheQuery.data.entries} / ${cacheQuery.data.maxEntries}`,
+                color: 'info.main',
+              },
+            ].map((m) => (
+              <Grid key={m.label} size={{ xs: 6, md: 3 }}>
+                <Box sx={{ p: 1.5, borderRadius: 1.5, border: '1px solid', borderColor: 'divider' }}>
+                  <Typography variant="caption" color="text.secondary">
+                    {m.label}
+                  </Typography>
+                  <Typography variant="h6" fontWeight={800} sx={{ color: m.color }}>
+                    {m.value}
+                  </Typography>
+                </Box>
+              </Grid>
+            ))}
+          </Grid>
+
+          {Object.keys(cacheQuery.data.byNamespace).length > 0 && (
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {Object.entries(cacheQuery.data.byNamespace).map(([ns, nsStat]) => (
+                <Chip
+                  key={ns}
+                  size="small"
+                  variant="outlined"
+                  label={`${ns}: ${nsStat.hitRatePct}% (${nsStat.hits}H / ${nsStat.misses}M)`}
+                />
+              ))}
+            </Stack>
+          )}
+        </Paper>
+      )}
 
       {movingList.length > 0 && (
         <Paper sx={{ p: 2.5 }}>

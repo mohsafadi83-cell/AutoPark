@@ -8,6 +8,11 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/alarm_severity_badge.dart';
 import '../../l10n/generated/app_localizations.dart';
 
+/// Unified AutoPark Mobile Control Console:
+/// 1. Live Connection + Available / Occupied KPI Strip
+/// 2. Live Lift Status Card (Standby / Moving / Safety Blocked)
+/// 3. Interactive 12-Bay Parking Map (L11–L43; tap ONLY selects bay — never triggers motion)
+/// 4. Inline Selected Bay Action Panel (CALL LIFT / RETRIEVE VEHICLE + independent RETURN LIFT TO HOME)
 class ParkingMapScreen extends ConsumerStatefulWidget {
   const ParkingMapScreen({super.key});
 
@@ -19,12 +24,289 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
   int? _selectedLevel;
   String? _selectedZone;
   SpaceStatus? _selectedStatus;
+  String? _selectedSpaceNumber;
+  String? _selectedVehicleId;
+  final _manualPlateCtrl = TextEditingController();
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _manualPlateCtrl.dispose();
+    super.dispose();
+  }
+
+  String _floorDescription(int level, bool isAr) {
+    switch (level) {
+      case 3:
+        return isAr ? 'P3 (سطح الأرض — دخول وخروج)' : 'P3 (Ground Level — Entry/Exit)';
+      case 2:
+        return isAr ? 'P2 (الطابق الأوسط تحت الأرض)' : 'P2 (Middle Underground)';
+      default:
+        return isAr ? 'P1 (الطابق السفلي تحت الأرض)' : 'P1 (Lower Underground)';
+    }
+  }
+
+  Future<void> _confirmAndCallLift({
+    required ParkingSpace space,
+    required bool isPark,
+  }) async {
+    final l10n = AppLocalizations.of(context);
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    final messenger = ScaffoldMessenger.of(context);
+    final appState = ref.read(appControllerProvider);
+    final vehicles = appState.vehicles;
+
+    String? vehicleId = _selectedVehicleId;
+    if (isPark && (vehicleId == null || !vehicles.any((v) => v.id == vehicleId))) {
+      vehicleId = vehicles.isNotEmpty ? vehicles.first.id : null;
+    }
+    final manualPlate = _manualPlateCtrl.text.trim().toUpperCase();
+    final useManual = manualPlate.isNotEmpty;
+
+    if (isPark && !useManual && (vehicleId == null || vehicleId.isEmpty)) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            isAr
+                ? 'اختر مركبة مسجلة أو أدخل رقم اللوحة قبل استدعاء المصعد'
+                : 'Select a registered vehicle or enter a plate number first',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              isPark ? Icons.local_parking_rounded : Icons.directions_car_rounded,
+              color: isPark ? const Color(0xFF16A34A) : AppColors.primaryCyan,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                isPark
+                    ? (isAr ? 'تأكيد استدعاء المصعد للإيداع' : 'Confirm Call Lift (Park)')
+                    : (isAr ? 'تأكيد استدعاء السيارة' : 'Confirm Retrieve Vehicle'),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isAr
+                  ? 'الموقف المحدد: ${space.spaceNumber}'
+                  : 'Selected Bay: ${space.spaceNumber}',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            Text('${space.zone} • ${_floorDescription(space.level, isAr)}'),
+            if (!isPark && space.vehiclePlate != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                '${l10n.plateNumber}: ${space.vehiclePlate}',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ],
+            const SizedBox(height: 10),
+            Text(
+              isAr
+                  ? 'سيتم إرسال الأمر عبر الخادم وطابور الأمان إلى المصعد بعد التحقق من جميع شروط السلامة.'
+                  : 'The command will be dispatched through the backend FIFO safety queue after all PLC interlock checks pass.',
+              style: Theme.of(ctx).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(l10n.cancel),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor:
+                  isPark ? const Color(0xFF16A34A) : AppColors.primaryCyan,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(
+              isPark
+                  ? (isAr ? 'استدعاء المصعد' : 'CALL LIFT')
+                  : (isAr ? 'استدعاء السيارة' : 'RETRIEVE VEHICLE'),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _submitting = true);
+    try {
+      final api = ref.read(appControllerProvider.notifier).api;
+      final req = isPark
+          ? await api.requestPark(
+              vehicleId: useManual ? null : vehicleId,
+              plateNumber: useManual ? manualPlate : null,
+              targetSpaceNumber: space.spaceNumber,
+            )
+          : await api.requestRetrieve(
+              plateNumber: space.vehiclePlate,
+              targetSpaceNumber: space.spaceNumber,
+            );
+      ref.read(appControllerProvider.notifier).upsertRequest(req);
+      await ref.read(appControllerProvider.notifier).refreshAllData();
+      _manualPlateCtrl.clear();
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF16A34A),
+            content: Text(
+              isPark
+                  ? (isAr
+                      ? '✅ تم إرسال أمر استدعاء المصعد للموقف ${space.spaceNumber}'
+                      : '✅ Lift called for bay ${space.spaceNumber}')
+                  : (isAr
+                      ? '✅ تم إرسال أمر استدعاء السيارة من الموقف ${space.spaceNumber}'
+                      : '✅ Vehicle retrieval started from bay ${space.spaceNumber}'),
+            ),
+          ),
+        );
+      }
+    } on ApiError catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusError,
+            content: Text(e.localizedMessage(l10n)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusError,
+            content: Text(e.toString()),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  Future<void> _confirmAndReturnLiftToHome() async {
+    final l10n = AppLocalizations.of(context);
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    final messenger = ScaffoldMessenger.of(context);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.home_work_rounded, color: Color(0xFFD97706)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                isAr
+                    ? 'إرجاع المصعد إلى الوضع الطبيعي'
+                    : 'Return Lift to Home',
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          isAr
+              ? 'يرجى التأكد من اكتمال التخزين أو خروج السيارة وخلو منصة المصعد تماماً قبل إرجاع المصعد إلى موضع الانتظار الطبيعي.'
+              : 'Please verify that the vehicle has been stored or exited and the lift platform is completely clear before returning the lift to Home.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(l10n.cancel),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFD97706),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(
+              isAr ? 'تأكيد الإرجاع' : 'RETURN LIFT TO HOME',
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _submitting = true);
+    try {
+      await ref.read(appControllerProvider.notifier).api.returnLiftToHome();
+      await ref.read(appControllerProvider.notifier).refreshAllData();
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFFD97706),
+            content: Text(
+              isAr
+                  ? '✅ تم إرسال أمر إرجاع المصعد إلى الوضع الطبيعي بنجاح'
+                  : '✅ Return Lift to Home command dispatched safely',
+            ),
+          ),
+        );
+      }
+    } on ApiError catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusError,
+            content: Text(e.localizedMessage(l10n)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusError,
+            content: Text(e.toString()),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
     final appState = ref.watch(appControllerProvider);
     final allSpaces = appState.spaces;
+    final sys = appState.systemStatus;
+    final user = appState.user;
+
+    final availableCount =
+        allSpaces.where((s) => s.status == SpaceStatus.available).length;
+    final occupiedCount =
+        allSpaces.where((s) => s.status == SpaceStatus.occupied).length;
+    final hasActiveMove = appState.activeRequests.isNotEmpty;
+    final isSafetyBlocked = !appState.canDispatchCommands;
+    final canRequest = (user?.canRequestParking ?? false) &&
+        appState.canDispatchCommands &&
+        !_submitting;
+    final canManualPlate = user?.canRequestAnyVehicle ?? false;
 
     final levels = (appState.dashboard?.levels.isNotEmpty ?? false)
         ? appState.dashboard!.levels
@@ -42,237 +324,513 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
       return true;
     }).toList();
 
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-          color: Theme.of(context).appBarTheme.backgroundColor,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    ParkingSpace? selectedSpace;
+    if (_selectedSpaceNumber != null) {
+      for (final s in allSpaces) {
+        if (s.spaceNumber == _selectedSpaceNumber) {
+          selectedSpace = s;
+          break;
+        }
+      }
+    }
+
+    // Resolve live Lift Status Card state from real backend/system telemetry
+    final Color liftColor;
+    final IconData liftIcon;
+    final String liftTitle;
+    final String liftSubtitle;
+    final isSystemOnline = appState.networkOnline && appState.backendReachable;
+    if (!isSystemOnline || !(sys?.controllerConnected ?? false)) {
+      liftColor = AppColors.statusError;
+      liftIcon = Icons.cloud_off_rounded;
+      liftTitle = isAr ? 'غير متصل بالمصعد' : 'Controller Offline';
+      liftSubtitle = isAr
+          ? 'لا يمكن تنفيذ حركة حتى استعادة الاتصال'
+          : 'Operations paused until PLC connection recovers';
+    } else if (isSafetyBlocked) {
+      liftColor = AppColors.statusError;
+      liftIcon = Icons.gpp_bad_rounded;
+      liftTitle = isAr ? 'توقف أمان / إنذار نشط' : 'Safety Interlock Active';
+      liftSubtitle = isAr
+          ? 'الحركة متوقفة لحين زوال حالة الأمان أو الطوارئ'
+          : 'Motion blocked until Emergency Stop / Alarm is cleared';
+    } else if (hasActiveMove) {
+      final activeReq = appState.activeRequests.first;
+      liftColor = const Color(0xFFD97706);
+      liftIcon = Icons.elevator_rounded;
+      liftTitle = isAr ? 'المصعد يتحرك الآن...' : 'Lift In Motion...';
+      liftSubtitle = isAr
+          ? 'عملية نشطة: ${activeReq.requestType == 'PARK' ? 'إيداع' : 'استرجاع'} (${activeReq.spaceNumber ?? '—'}) • ${activeReq.status}'
+          : 'Active: ${activeReq.requestType} (${activeReq.spaceNumber ?? '—'}) • ${activeReq.status}';
+    } else {
+      liftColor = const Color(0xFF16A34A);
+      liftIcon = Icons.check_circle_rounded;
+      liftTitle = isAr ? 'المصعد في وضع الانتظار — جاهز' : 'Lift Standby — Ready';
+      liftSubtitle = isAr
+          ? 'الموقع الحالي: موضع الانتظار المعتمد • P3 سطح الأرض (دخول/خروج)'
+          : 'Current Position: Engineered Home • P3 Ground Entry/Exit';
+    }
+
+    return RefreshIndicator(
+      onRefresh: () =>
+          ref.read(appControllerProvider.notifier).refreshAllData(),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 24),
+        children: [
+          // 1. Live System & Capacity KPI Strip
+          Row(
             children: [
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    ChoiceChip(
-                      label: Text(l10n.allLevels),
-                      selected: _selectedLevel == null,
-                      onSelected: (_) => setState(() => _selectedLevel = null),
-                    ),
-                    const SizedBox(width: 8),
-                    for (final lvl in levels) ...[
-                      ChoiceChip(
-                        label: Text(l10n.levelLabel(lvl)),
-                        selected: _selectedLevel == lvl,
-                        onSelected: (_) => setState(() => _selectedLevel = lvl),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                  ],
+              Expanded(
+                child: _KpiMiniCard(
+                  value: '$availableCount',
+                  label: isAr ? 'مواقف فارغة' : 'Available',
+                  color: const Color(0xFF16A34A),
+                  icon: Icons.check_circle_outline_rounded,
                 ),
               ),
-              const SizedBox(height: 8),
-              Row(
+              const SizedBox(width: 8),
+              Expanded(
+                child: _KpiMiniCard(
+                  value: '$occupiedCount',
+                  label: isAr ? 'مواقف مشغولة' : 'Occupied',
+                  color: AppColors.primaryCyan,
+                  icon: Icons.directions_car_filled_rounded,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _KpiMiniCard(
+                  value: (isSystemOnline && (sys?.controllerConnected ?? false))
+                      ? (isAr ? 'متصل' : 'Online')
+                      : (isAr ? 'مفصول' : 'Offline'),
+                  label: isAr ? 'حالة النظام' : 'System',
+                  color: (isSystemOnline && (sys?.controllerConnected ?? false))
+                      ? const Color(0xFF16A34A)
+                      : AppColors.statusError,
+                  icon: Icons.wifi_tethering_rounded,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // 2. Live Lift Status Card
+          Card(
+            margin: EdgeInsets.zero,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(color: liftColor.withOpacity(0.6), width: 1.4),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
                 children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String?>(
-                      value: _selectedZone,
-                      decoration: InputDecoration(
-                        labelText: l10n.allZones,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                      ),
-                      items: [
-                        DropdownMenuItem(
-                          value: null,
-                          child: Text(l10n.allZones),
-                        ),
-                        for (final z in zones)
-                          DropdownMenuItem(
-                            value: z,
-                            child: Text(l10n.zoneLabel(z)),
-                          ),
-                      ],
-                      onChanged: (v) => setState(() => _selectedZone = v),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: liftColor.withOpacity(0.16),
+                      borderRadius: BorderRadius.circular(12),
                     ),
+                    child: Icon(liftIcon, color: liftColor, size: 26),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 12),
                   Expanded(
-                    child: DropdownButtonFormField<SpaceStatus?>(
-                      value: _selectedStatus,
-                      decoration: InputDecoration(
-                        labelText: l10n.allStatuses,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isAr ? 'حالة المصعد' : 'Lift Status',
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.4,
+                              ),
                         ),
-                      ),
-                      items: [
-                        DropdownMenuItem(
-                          value: null,
-                          child: Text(l10n.allStatuses),
-                        ),
-                        for (final st in SpaceStatus.values)
-                          DropdownMenuItem(
-                            value: st,
-                            child: Text(SpaceStatusBadge.labelFor(l10n, st)),
+                        const SizedBox(height: 2),
+                        Text(
+                          liftTitle,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14,
+                            color: liftColor,
                           ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          liftSubtitle,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                       ],
-                      onChanged: (v) => setState(() => _selectedStatus = v),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              // 4-Color Legend Bar matching employee parking rules (fully bilingual)
-                Builder(
-                builder: (ctx) {
-                  final isAr = Localizations.localeOf(ctx).languageCode == 'ar';
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: [
-                          _ColorLegendPill(
-                            color: const Color(0xFF16A34A),
-                            label: isAr ? 'فارغ' : 'Empty',
-                          ),
-                          _ColorLegendPill(
-                            color: const Color(0xFFEAB308),
-                            label: isAr ? 'سيارتك' : 'Your Car',
-                          ),
-                          _ColorLegendPill(
-                            color: const Color(0xFF8B5CF6),
-                            label: isAr ? 'حرّكته لسيارة أخرى' : 'Other Car (By You)',
-                          ),
-                          _ColorLegendPill(
-                            color: const Color(0xFFDC2626),
-                            label: isAr ? 'سيارات الزملاء' : 'Colleagues',
-                          ),
-                        ],
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Filters & 4-Color Legend
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                ChoiceChip(
+                  label: Text(l10n.allLevels),
+                  selected: _selectedLevel == null,
+                  onSelected: (_) => setState(() => _selectedLevel = null),
+                ),
+                const SizedBox(width: 6),
+                for (final lvl in levels.reversed) ...[
+                  ChoiceChip(
+                    label: Text(
+                      lvl == 3
+                          ? (isAr ? 'P3 سطح الأرض' : 'P3 Ground')
+                          : (lvl == 2
+                              ? (isAr ? 'P2 أوسط' : 'P2 Mid')
+                              : (isAr ? 'P1 سفلي' : 'P1 Lower')),
+                    ),
+                    selected: _selectedLevel == lvl,
+                    onSelected: (_) => setState(() => _selectedLevel = lvl),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String?>(
+                  value: _selectedZone,
+                  decoration: InputDecoration(
+                    labelText: l10n.allZones,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                  items: [
+                    DropdownMenuItem(value: null, child: Text(l10n.allZones)),
+                    for (final z in zones)
+                      DropdownMenuItem(value: z, child: Text(l10n.zoneLabel(z))),
+                  ],
+                  onChanged: (v) => setState(() => _selectedZone = v),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: DropdownButtonFormField<SpaceStatus?>(
+                  value: _selectedStatus,
+                  decoration: InputDecoration(
+                    labelText: l10n.allStatuses,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                  items: [
+                    DropdownMenuItem(value: null, child: Text(l10n.allStatuses)),
+                    for (final st in SpaceStatus.values)
+                      DropdownMenuItem(
+                        value: st,
+                        child: Text(SpaceStatusBadge.labelFor(l10n, st)),
                       ),
-                      const SizedBox(height: 8),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFD97706),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                        ),
-                        onPressed: () async {
-                          final messenger = ScaffoldMessenger.of(context);
-                          await ref
-                              .read(appControllerProvider.notifier)
-                              .api
-                              .returnLiftToGroundFloor();
-                          if (mounted) {
-                            messenger.showSnackBar(
-                              SnackBar(
-                                backgroundColor: const Color(0xFFD97706),
-                                content: Text(
-                                  isAr
-                                      ? '⬇ تم إرسال أمر إرجاع المصعد إلى الطابق الأرضي (الوضع الافتراضي P1)'
-                                      : '⬇ Return Lift to Ground Floor (P1) command sent',
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.arrow_downward_rounded, size: 18),
-                        label: Text(
-                          isAr
-                              ? 'إرجاع المصعد للطابق الأرضي (الوضع الافتراضي P1)'
-                              : 'Return Lift to Ground Floor (Default P1)',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 12.5,
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                },
+                  ],
+                  onChanged: (v) => setState(() => _selectedStatus = v),
+                ),
               ),
             ],
           ),
-        ),
-        Expanded(
-          child: RefreshIndicator(
-            onRefresh: () =>
-                ref.read(appControllerProvider.notifier).refreshSpacesSilent(),
-            child: ListView(
-              padding: const EdgeInsets.all(12),
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (int col = 0; col < 4; col++) ...[
-                      if (col > 0) const SizedBox(width: 8),
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).cardColor.withOpacity(0.45),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: Theme.of(context).dividerColor.withOpacity(0.35),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              _ColorLegendPill(
+                color: const Color(0xFF16A34A),
+                label: isAr ? 'فارغ' : 'Empty',
+              ),
+              _ColorLegendPill(
+                color: const Color(0xFFEAB308),
+                label: isAr ? 'سيارتك' : 'Your Car',
+              ),
+              _ColorLegendPill(
+                color: const Color(0xFF8B5CF6),
+                label: isAr ? 'سيارة أخرى (بواسطتك)' : 'Other Car (You)',
+              ),
+              _ColorLegendPill(
+                color: const Color(0xFFDC2626),
+                label: isAr ? 'زملاء' : 'Colleagues',
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // 3. Interactive 12-Bay Parking Map (Tap ONLY selects — zero automatic motion)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (int col = 0; col < 4; col++) ...[
+                if (col > 0) const SizedBox(width: 6),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(5),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).cardColor.withOpacity(0.45),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Theme.of(context).dividerColor.withOpacity(0.35),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text(
+                            'Lane ${col + 1}',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 11,
+                              color: Theme.of(context).colorScheme.primary,
                             ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Text(
-                                  'Lane ${col + 1}',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 11.5,
-                                    color: Theme.of(context).colorScheme.primary,
-                                  ),
-                                ),
-                              ),
-                              for (final sp in (filtered
-                                  .where((s) =>
-                                      s.zone == 'Lane ${col + 1}' ||
-                                      (!s.zone.startsWith('Lane') &&
-                                          filtered.indexOf(s) ~/ 3 == col))
-                                  .toList()
-                                ..sort((a, b) => b.level.compareTo(a.level)))) ...[
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: _buildSpaceCard(context, sp, appState.user),
-                                ),
-                              ],
-                            ],
+                        ),
+                        for (final sp in (filtered
+                            .where((s) =>
+                                s.zone == 'Lane ${col + 1}' ||
+                                (!s.zone.startsWith('Lane') &&
+                                    filtered.indexOf(s) ~/ 3 == col))
+                            .toList()
+                          ..sort((a, b) => b.level.compareTo(a.level)))) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: _buildSpaceCard(
+                              context,
+                              sp,
+                              user,
+                              isSelected: sp.spaceNumber == _selectedSpaceNumber,
+                            ),
                           ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // 4. Inline Selected Bay Action Panel (Unified Single-Screen Control)
+          Card(
+            margin: EdgeInsets.zero,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(
+                color: selectedSpace != null
+                    ? Theme.of(context).colorScheme.primary.withOpacity(0.65)
+                    : Theme.of(context).dividerColor.withOpacity(0.4),
+                width: 1.5,
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        isAr ? 'إجراءات الموقف المحدد' : 'Selected Bay Actions',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
+                      if (selectedSpace != null)
+                        SpaceStatusBadge(status: selectedSpace.status),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  if (selectedSpace == null)
+                    Text(
+                      isAr
+                          ? 'اضغط على أي موقف من الخريطة أعلاه لتحديده (التحديد لا يحرّك المصعد تلقائياً).'
+                          : 'Tap any bay on the map above to select it (selecting a bay never moves the lift automatically).',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    )
+                  else ...[
+                    Text(
+                      isAr
+                          ? 'الموقف المحدد: ${selectedSpace.spaceNumber} — ${selectedSpace.zone}'
+                          : 'Selected Bay: ${selectedSpace.spaceNumber} — ${selectedSpace.zone}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _floorDescription(selectedSpace.level, isAr),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    if (selectedSpace.vehiclePlate != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        '${l10n.plateNumber}: ${selectedSpace.vehiclePlate}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.primaryCyan,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    if (selectedSpace.status == SpaceStatus.available) ...[
+                      if (appState.vehicles.isNotEmpty) ...[
+                        DropdownButtonFormField<String>(
+                          value: appState.vehicles
+                                  .any((v) => v.id == _selectedVehicleId)
+                              ? _selectedVehicleId
+                              : appState.vehicles.first.id,
+                          decoration: InputDecoration(
+                            labelText: isAr
+                                ? 'المركبة المسجلة'
+                                : 'Registered Vehicle',
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                          ),
+                          items: [
+                            for (final v in appState.vehicles)
+                              DropdownMenuItem(
+                                value: v.id,
+                                child: Text(v.displayName),
+                              ),
+                          ],
+                          onChanged: _submitting
+                              ? null
+                              : (val) =>
+                                  setState(() => _selectedVehicleId = val),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      if (canManualPlate || appState.vehicles.isEmpty) ...[
+                        TextField(
+                          controller: _manualPlateCtrl,
+                          enabled: !_submitting,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: InputDecoration(
+                            labelText: isAr
+                                ? 'أو أدخل رقم اللوحة يدوياً (اختياري)'
+                                : 'Or enter plate number manually (optional)',
+                            hintText: '10-45821',
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF16A34A),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                        ),
+                        onPressed: (canRequest && !hasActiveMove)
+                            ? () => _confirmAndCallLift(
+                                  space: selectedSpace!,
+                                  isPark: true,
+                                )
+                            : null,
+                        icon: _submitting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.elevator_rounded),
+                        label: Text(
+                          isAr
+                              ? 'استدعاء المصعد (${selectedSpace.spaceNumber}) — CALL LIFT'
+                              : 'CALL LIFT (${selectedSpace.spaceNumber})',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ] else if (selectedSpace.status == SpaceStatus.occupied) ...[
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primaryCyan,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                        ),
+                        onPressed: (canRequest && !hasActiveMove)
+                            ? () => _confirmAndCallLift(
+                                  space: selectedSpace!,
+                                  isPark: false,
+                                )
+                            : null,
+                        icon: _submitting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.directions_car_rounded),
+                        label: Text(
+                          isAr
+                              ? 'استدعاء السيارة (${selectedSpace.spaceNumber}) — RETRIEVE'
+                              : 'RETRIEVE VEHICLE (${selectedSpace.spaceNumber})',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
                         ),
                       ),
                     ],
                   ],
-                ),
-              ],
+                  const SizedBox(height: 10),
+                  // Independent Return Lift to Home Button (Step 2)
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFD97706),
+                      side: const BorderSide(
+                        color: Color(0xFFD97706),
+                        width: 1.5,
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    onPressed: canRequest ? _confirmAndReturnLiftToHome : null,
+                    icon: const Icon(Icons.home_work_rounded, size: 19),
+                    label: Text(
+                      isAr
+                          ? 'إرجاع المصعد إلى الوضع الطبيعي — RETURN LIFT TO HOME'
+                          : 'RETURN LIFT TO HOME',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   Color _colorForCategory(String cat) {
     switch (cat) {
       case 'YELLOW_MY_CAR':
-        return const Color(0xFFEAB308); // أصفر: سيارة الموظف نفسه
+        return const Color(0xFFEAB308);
       case 'PURPLE_PARKED_OTHER':
-        return const Color(0xFF8B5CF6); // نهدي: حرّكه الموظف لسيارة أخرى
+        return const Color(0xFF8B5CF6);
       case 'RED_COLLEAGUE':
-        return const Color(0xFFDC2626); // أحمر: سيارة زميل محجوزة
+        return const Color(0xFFDC2626);
       default:
-        return const Color(0xFF16A34A); // أخضر: مصف فارغ
+        return const Color(0xFF16A34A);
     }
   }
 
@@ -281,9 +839,9 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
       case 'YELLOW_MY_CAR':
         return isAr ? 'سيارتك' : 'Your Car';
       case 'PURPLE_PARKED_OTHER':
-        return isAr ? 'سيارة أخرى (بواسطتك)' : 'Other Car (You)';
+        return isAr ? 'أخرى' : 'Other';
       case 'RED_COLLEAGUE':
-        return isAr ? 'زميل (محجوز)' : 'Colleague';
+        return isAr ? 'مشغول' : 'Occupied';
       default:
         return isAr ? 'فارغ' : 'Empty';
     }
@@ -302,27 +860,36 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
     }
   }
 
-  Widget _buildSpaceCard(BuildContext context, ParkingSpace space, User? viewer) {
+  Widget _buildSpaceCard(
+    BuildContext context,
+    ParkingSpace space,
+    User? viewer, {
+    required bool isSelected,
+  }) {
     final isAr = Localizations.localeOf(context).languageCode == 'ar';
     final cat = space.resolveColorCategory(viewer);
     final color = _colorForCategory(cat);
     final icon = _iconForCategory(cat);
     final label = _labelForCategory(cat, isAr);
+
     return Card(
       margin: EdgeInsets.zero,
-      color: color.withOpacity(0.14),
+      elevation: isSelected ? 4 : 0,
+      color: isSelected ? color.withOpacity(0.28) : color.withOpacity(0.13),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         side: BorderSide(
-          color: color.withOpacity(0.85),
-          width: 1.6,
+          color: isSelected
+              ? Theme.of(context).colorScheme.primary
+              : color.withOpacity(0.8),
+          width: isSelected ? 2.4 : 1.3,
         ),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => _showSpaceDetails(context, space, viewer),
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => setState(() => _selectedSpaceNumber = space.spaceNumber),
         child: Padding(
-          padding: const EdgeInsets.all(9),
+          padding: const EdgeInsets.all(7),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -333,52 +900,41 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
                     space.spaceNumber,
                     style: const TextStyle(
                       fontWeight: FontWeight.w800,
-                      fontSize: 13,
+                      fontSize: 12.5,
                     ),
                   ),
-                  Icon(icon, color: color, size: 17),
+                  Icon(
+                    isSelected ? Icons.radio_button_checked_rounded : icon,
+                    color: isSelected
+                        ? Theme.of(context).colorScheme.primary
+                        : color,
+                    size: 16,
+                  ),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
               if (space.vehiclePlate != null)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: color.withOpacity(0.22),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      space.vehiclePlate!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: color,
-                      ),
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    space.vehiclePlate!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: color,
                     ),
                   ),
                 ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: color,
-                  ),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w800,
+                  color: color,
                 ),
               ),
             ],
@@ -387,295 +943,51 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
       ),
     );
   }
+}
 
-  void _showSpaceDetails(BuildContext context, ParkingSpace space, User? viewer) {
-    final l10n = AppLocalizations.of(context);
-    final isAr = Localizations.localeOf(context).languageCode == 'ar';
-    final cat = space.resolveColorCategory(viewer);
-    final catColor = _colorForCategory(cat);
-    final catLabel = _labelForCategory(cat, isAr);
-    final appState = ref.read(appControllerProvider);
-    final vehicles = appState.vehicles;
+class _KpiMiniCard extends StatelessWidget {
+  const _KpiMiniCard({
+    required this.value,
+    required this.label,
+    required this.color,
+    required this.icon,
+  });
 
-    String? selectedVehicleId = vehicles.isNotEmpty ? vehicles.first.id : null;
-    final plateCtrl = TextEditingController();
-    bool submitting = false;
+  final String value;
+  final String label;
+  final Color color;
+  final IconData icon;
 
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) {
-          final isAvailable = space.status == SpaceStatus.available;
-          final isOccupied = space.status == SpaceStatus.occupied;
-
-          Future<void> dispatchMove({required bool isPark}) async {
-            final messenger = ScaffoldMessenger.of(context);
-            final manualPlate = plateCtrl.text.trim().toUpperCase();
-            final useManual = manualPlate.isNotEmpty;
-            if (isPark && !useManual && (selectedVehicleId == null || selectedVehicleId!.isEmpty)) {
-              messenger.showSnackBar(
-                SnackBar(
-                  content: Text(
-                    isAr
-                        ? 'اختر مركبة أو أدخل رقم اللوحة أولاً'
-                        : 'Select a vehicle or enter a plate number first',
-                  ),
-                ),
-              );
-              return;
-            }
-            setSheetState(() => submitting = true);
-            try {
-              final api = ref.read(appControllerProvider.notifier).api;
-              final req = isPark
-                  ? await api.requestPark(
-                      vehicleId: useManual ? null : selectedVehicleId,
-                      plateNumber: useManual ? manualPlate : null,
-                      targetSpaceNumber: space.spaceNumber,
-                    )
-                  : await api.requestRetrieve(
-                      plateNumber: space.vehiclePlate,
-                      targetSpaceNumber: space.spaceNumber,
-                    );
-              // Parse Lane (1..4) & Level (1..3) from spaceNumber (e.g. L42 -> lane=4, level=2)
-              final sn = space.spaceNumber.trim().toUpperCase();
-              int parsedLane = 0;
-              int parsedLevel = space.level;
-              if (sn.length >= 3 && sn.startsWith('L')) {
-                parsedLane = int.tryParse(sn.substring(1, 2)) ?? 0;
-                parsedLevel = int.tryParse(sn.substring(2, 3)) ?? space.level;
-              }
-              if (parsedLane >= 1 && parsedLane <= 4) {
-                await api.dispatchAutoPlcStep1(
-                  isPark: isPark,
-                  lane: parsedLane,
-                  level: parsedLevel,
-                );
-              }
-              ref.read(appControllerProvider.notifier).upsertRequest(req);
-              await ref.read(appControllerProvider.notifier).refreshAllData();
-              if (ctx.mounted) Navigator.of(ctx).pop();
-              if (mounted) {
-                messenger.showSnackBar(
-                  SnackBar(
-                    backgroundColor: const Color(0xFF16A34A),
-                    content: Text(
-                      isPark
-                          ? (isAr
-                              ? '✅ تم إرسال أمر الإيداع وتحريك المصعد إلى ${space.spaceNumber}'
-                              : '✅ Park & lift move dispatched to ${space.spaceNumber}')
-                          : (isAr
-                              ? '✅ تم إرسال أمر الاسترجاع وتحريك المصعد من ${space.spaceNumber}'
-                              : '✅ Retrieve & lift move dispatched from ${space.spaceNumber}'),
-                    ),
-                  ),
-                );
-              }
-            } on ApiError catch (e) {
-              setSheetState(() => submitting = false);
-              if (mounted) {
-                messenger.showSnackBar(
-                  SnackBar(
-                    backgroundColor: AppColors.statusError,
-                    content: Text(e.localizedMessage(l10n)),
-                  ),
-                );
-              }
-            } catch (e) {
-              setSheetState(() => submitting = false);
-              if (mounted) {
-                messenger.showSnackBar(
-                  SnackBar(
-                    backgroundColor: AppColors.statusError,
-                    content: Text(e.toString()),
-                  ),
-                );
-              }
-            }
-          }
-
-          return SafeArea(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                20,
-                20,
-                20,
-                20 + MediaQuery.of(ctx).viewInsets.bottom,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          l10n.spaceDetailsTitle(space.spaceNumber),
-                          style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w800,
-                              ),
-                        ),
-                        SpaceStatusBadge(status: space.status),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: catColor.withOpacity(0.18),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: catColor.withOpacity(0.7)),
-                        ),
-                        child: Text(
-                          catLabel,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                            color: catColor,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      '${l10n.levelLabel(space.level)} • ${l10n.zoneLabel(space.zone)}',
-                    ),
-                    if (space.vehiclePlate != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        '${l10n.plateNumber}: ${space.vehiclePlate}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.primaryCyan,
-                        ),
-                      ),
-                    ],
-                    if (space.parkedByUsername != null &&
-                        space.parkedByUsername!.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        isAr
-                            ? 'تم التحريك بواسطة: ${space.parkedByUsername}'
-                            : 'Moved by: ${space.parkedByUsername}',
-                        style: const TextStyle(fontSize: 12.5),
-                      ),
-                    ],
-                    if (isAvailable) ...[
-                      const SizedBox(height: 16),
-                      const Divider(),
-                      const SizedBox(height: 8),
-                      if (vehicles.isNotEmpty) ...[
-                        DropdownButtonFormField<String>(
-                          value: selectedVehicleId,
-                          decoration: InputDecoration(
-                            labelText: isAr
-                                ? 'اختر مركبة مسجلة'
-                                : 'Select Registered Vehicle',
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                          ),
-                          items: [
-                            for (final v in vehicles)
-                              DropdownMenuItem(
-                                value: v.id,
-                                child: Text(v.displayName),
-                              ),
-                          ],
-                          onChanged: submitting
-                              ? null
-                              : (val) =>
-                                  setSheetState(() => selectedVehicleId = val),
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-                      TextField(
-                        controller: plateCtrl,
-                        enabled: !submitting,
-                        textCapitalization: TextCapitalization.characters,
-                        decoration: InputDecoration(
-                          labelText: isAr
-                              ? 'أو أدخل رقم اللوحة يدوياً (اختياري)'
-                              : 'Or enter plate number manually (optional)',
-                          hintText: '10-45821',
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF16A34A),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 13),
-                        ),
-                        onPressed: submitting
-                            ? null
-                            : () => dispatchMove(isPark: true),
-                        icon: submitting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.local_parking_rounded),
-                        label: Text(
-                          isAr
-                              ? 'إيداع وتحريك المصعد إلى ${space.spaceNumber}'
-                              : 'Park & Move Lift to ${space.spaceNumber}',
-                          style: const TextStyle(fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                    ],
-                    if (isOccupied) ...[
-                      const SizedBox(height: 16),
-                      const Divider(),
-                      const SizedBox(height: 10),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primaryCyan,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 13),
-                        ),
-                        onPressed: submitting
-                            ? null
-                            : () => dispatchMove(isPark: false),
-                        icon: submitting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.directions_car_rounded),
-                        label: Text(
-                          isAr
-                              ? 'استرجاع وتحريك المصعد من ${space.spaceNumber}'
-                              : 'Retrieve & Move Lift from ${space.spaceNumber}',
-                          style: const TextStyle(fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: color.withOpacity(0.45)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 18),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
+                color: color,
               ),
             ),
-          );
-        },
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+          ],
+        ),
       ),
     );
   }

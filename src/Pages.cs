@@ -616,6 +616,7 @@ namespace AutoPark
         int _waitTicks = 0;
         bool _cancelled = false;
         volatile bool _backendDispatched = false;
+        volatile bool _sensorPollInFlight = false;
         SpaceItem _chosenSpace;
         string _chosenPlate;
         CommandRecord _activeCmd;
@@ -1093,7 +1094,16 @@ namespace AutoPark
 
                 if (stepCode >= 1 && stepCode <= 3 && st.Sensors.LiveConnected)
                 {
-                    st.PullSensorsFromBackend();
+                    // Non-blocking background PLC sensor poll so WinForms UI thread never freezes during lift travel
+                    if (!_sensorPollInFlight)
+                    {
+                        _sensorPollInFlight = true;
+                        System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                        {
+                            try { st.PullSensorsFromBackend(); }
+                            finally { _sensorPollInFlight = false; }
+                        });
+                    }
                     bool lsReached = st.Sensors.LimitSwitches[lane - 1, stepCode - 1];
                     // Also accept PLC's own Step-Done / Step2-Ready handshake (Park_Step1_Done DB2,X5.5 / Park_Step2_Ready DB2,X5.6 / Park_Step2_OK DB2,X6.1)
                     bool plcStepReady = st.Sensors.Step1Done || st.Sensors.Step2Ready || st.Sensors.Step2Done;

@@ -6,6 +6,7 @@ import * as bcrypt from 'bcryptjs';
 import { IsEmail, IsEnum, IsOptional, IsString, Matches, MinLength } from 'class-validator';
 import { Repository } from 'typeorm';
 import { APP_CONFIG, AppConfig } from '../../config/app.config';
+import { AppCacheService } from '../../common/cache.module';
 import { AuthUser, CurrentUser, ReqMeta, RequestMeta, RequirePermissions } from '../../common/decorators';
 import { Role, UserStatus } from '../../common/enums';
 import { AppError } from '../../common/errors';
@@ -54,24 +55,30 @@ export class UsersService {
     @InjectRepository(UserEntity) private readonly usersRepo: Repository<UserEntity>,
     @InjectRepository(RefreshTokenEntity) private readonly rtRepo: Repository<RefreshTokenEntity>,
     private readonly audit: AuditService,
+    private readonly cache: AppCacheService,
   ) {}
 
   async list(q: UserFilterQuery) {
     const { page, limit, skip, take } = pageParams(q);
-    const qb = this.usersRepo.createQueryBuilder('u').orderBy('u.created_at', 'DESC').skip(skip).take(take);
-    if (q.q) {
-      qb.andWhere('(u.full_name ILIKE :q OR u.username ILIKE :q OR u.email ILIKE :q)', { q: `%${q.q}%` });
-    }
-    if (q.role) qb.andWhere('u.role = :role', { role: q.role });
-    if (q.status) qb.andWhere('u.status = :status', { status: q.status });
-    const [rows, total] = await qb.getManyAndCount();
-    return paginated(rows.map(toUserDto), total, page, limit);
+    const cacheKey = `users:list:${q.q ?? ''}:${q.role ?? 'all'}:${q.status ?? 'all'}:${page}:${limit}`;
+    return this.cache.getOrSet(cacheKey, 10_000, async () => {
+      const qb = this.usersRepo.createQueryBuilder('u').orderBy('u.created_at', 'DESC').skip(skip).take(take);
+      if (q.q) {
+        qb.andWhere('(u.full_name ILIKE :q OR u.username ILIKE :q OR u.email ILIKE :q)', { q: `%${q.q}%` });
+      }
+      if (q.role) qb.andWhere('u.role = :role', { role: q.role });
+      if (q.status) qb.andWhere('u.status = :status', { status: q.status });
+      const [rows, total] = await qb.getManyAndCount();
+      return paginated(rows.map(toUserDto), total, page, limit);
+    });
   }
 
   async findOne(id: string) {
-    const u = await this.usersRepo.findOne({ where: { id } });
-    if (!u) throw AppError.notFound('User');
-    return toUserDto(u);
+    return this.cache.getOrSet(`users:one:${id}`, 10_000, async () => {
+      const u = await this.usersRepo.findOne({ where: { id } });
+      if (!u) throw AppError.notFound('User');
+      return toUserDto(u);
+    });
   }
 
   async create(dto: CreateUserDto, actor: AuthUser, meta: RequestMeta) {
@@ -99,6 +106,7 @@ export class UsersService {
       userAgent: meta.userAgent,
       details: { username: saved.username, role: saved.role },
     });
+    this.cache.invalidatePrefix('users:');
     return toUserDto(saved);
   }
 
@@ -132,6 +140,10 @@ export class UsersService {
     }
 
     const saved = await this.usersRepo.save(u);
+    this.cache.invalidatePrefix('users:');
+    this.cache.delete(`auth:user:${u.id}`);
+    this.cache.delete(`auth:me:${u.id}`);
+    this.cache.delete(`auth:prefs:${u.id}`);
     if (dto.status === UserStatus.DISABLED || dto.password) {
       await this.rtRepo
         .createQueryBuilder()

@@ -191,6 +191,8 @@ export class IndustrialIntegrationService implements OnModuleInit, OnModuleDestr
 
   async applySimulationScenario(scenario: MockScenario, user: AuthUser, meta: RequestMeta): Promise<MockState> {
     const state = await this.getMockAdapter().applyScenario(scenario);
+    this.cache.invalidatePrefix('industrial:');
+    this.cache.invalidatePrefix('alarms:');
     await this.audit.log({
       userId: user.id,
       username: user.username,

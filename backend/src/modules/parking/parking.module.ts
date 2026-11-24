@@ -87,6 +87,7 @@ export class ParkingService implements OnModuleInit, OnModuleDestroy {
 
   private invalidateParkingCache() {
     this.cache.invalidatePrefix('parking:');
+    this.cache.invalidatePrefix('vehicles:');
   }
 
   onModuleInit() {
@@ -176,8 +177,11 @@ export class ParkingService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getSpace(id: string, viewer?: AuthUser) {
-    const s = await this.spaceRepo.findOne({ where: { id }, relations: ['vehicle'] });
-    if (!s) throw AppError.notFound('Parking space');
+    const s = await this.cache.getOrSet(`parking:space:${id}`, 5000, async () => {
+      const found = await this.spaceRepo.findOne({ where: { id }, relations: ['vehicle'] });
+      if (!found) throw AppError.notFound('Parking space');
+      return found;
+    });
     return this.toSpaceDto(s, viewer);
   }
 
@@ -512,6 +516,7 @@ export class ParkingService implements OnModuleInit, OnModuleDestroy {
               sp.statusReason = reason;
             }
             await this.spaceRepo.save(sp);
+            this.invalidateParkingCache();
             this.realtime.emitToAll('parking.space.updated', await this.getSpace(sp.id));
           }
         }
@@ -768,6 +773,7 @@ export class ParkingService implements OnModuleInit, OnModuleDestroy {
       req.parkingSpace.parkedByUsername = null;
       req.parkingSpace.isOtherVehicle = false;
       await this.spaceRepo.save(req.parkingSpace);
+      this.invalidateParkingCache();
       this.realtime.emitToAll('parking.space.updated', await this.getSpace(req.parkingSpace.id));
     }
     await this.audit.log({
@@ -1103,7 +1109,12 @@ export class ParkingController {
   @RequireAnyPermission(Permission.HISTORY_VIEW_OWN, Permission.HISTORY_VIEW_ALL)
   async exportHistory(@CurrentUser() user: AuthUser, @Query() q: HistoryQuery, @Res() res: Response) {
     const data = await this.service.getHistory(user, { ...q, page: 1, limit: 100 });
-    const escapeCsv = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const escapeCsv = (v: unknown) => {
+      const raw = String(v ?? '');
+      // Neutralize spreadsheet formula injection (=, +, -, @, tab, CR)
+      const safe = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
     const lines = [
       'id,kind,title,description,plateNumber,status,actor,createdAt',
       ...data.items.map((i) =>

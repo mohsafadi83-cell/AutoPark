@@ -5,7 +5,7 @@ import request from 'supertest';
 import { spawnEmbeddedPostgresProcess } from '../scripts/embedded-postgres';
 import { createConfiguredApp } from '../src/main';
 
-describe('Auto Park Backend E2E (Safety, Security, Industrial Control)', () => {
+describe('Auto Park Backend E2E (Safety, Security, Caching, Industrial Control)', () => {
   let app: INestApplication;
   let pgHandle: { stop: () => Promise<void> } | null = null;
   let superAdminToken = '';
@@ -13,17 +13,32 @@ describe('Auto Park Backend E2E (Safety, Security, Industrial Control)', () => {
   let customerToken = '';
   let viewerToken = '';
 
+  const waitForCompletion = async (reqId: string, token: string) => {
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 150));
+      const poll = await request(app.getHttpServer())
+        .get(`/api/v1/parking/requests/${reqId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(poll.body.status)) {
+        return poll.body;
+      }
+    }
+    throw new Error(`Request ${reqId} did not finish within timeout`);
+  };
+
   beforeAll(async () => {
     const testDbPort = 54336;
     process.env.NODE_ENV = 'test';
     process.env.APP_MODE = 'SIMULATION';
+    process.env.INDUSTRIAL_PROTOCOL = 'MOCK';
     process.env.DB_PORT = String(testDbPort);
     process.env.SEED_DEMO = 'true';
     process.env.MOCK_SPEED_FACTOR = '25';
     process.env.COMMAND_ACK_TIMEOUT_MS = '1200';
-    process.env.LAYOUT_LEVELS = '2';
-    process.env.LAYOUT_ZONES = 'A';
-    process.env.LAYOUT_SPACES_PER_ZONE = '4';
+    process.env.LAYOUT_LEVELS = '3';
+    process.env.LAYOUT_ZONES = 'Lane 1,Lane 2,Lane 3,Lane 4';
+    process.env.LAYOUT_SPACES_PER_ZONE = '3';
 
     const dataDir = path.join(os.tmpdir(), `autopark-e2e-${Date.now()}`);
     pgHandle = await spawnEmbeddedPostgresProcess({ port: testDbPort, dataDir });
@@ -51,11 +66,51 @@ describe('Auto Park Backend E2E (Safety, Security, Industrial Control)', () => {
     await pgHandle?.stop();
   });
 
-  it('GET /api/v1/health returns ok and current mode/adapter', async () => {
+  it('GET /api/v1/health returns ok, mode/adapter, and live cache stats', async () => {
     const res = await request(app.getHttpServer()).get('/api/v1/health').expect(200);
     expect(res.body.status).toBe('ok');
     expect(res.body.mode).toBe('SIMULATION');
     expect(res.body.adapter).toBe('MOCK');
+    expect(res.body.cache).toBeDefined();
+    expect(res.body.cache.backend).toBe('memory');
+  });
+
+  it('caches repeated DB queries, reports live hit rates, and flushes cleanly for admins', async () => {
+    // Flush first so metrics start from a clean cache state
+    const flushRes = await request(app.getHttpServer())
+      .post('/api/v1/health/cache/flush')
+      .set('Authorization', `Bearer ${superAdminToken}`)
+      .expect(200);
+    expect(flushRes.body.ok).toBe(true);
+
+    // Hit /parking/spaces and /vehicles multiple times
+    for (let i = 0; i < 4; i++) {
+      await request(app.getHttpServer())
+        .get('/api/v1/parking/spaces')
+        .set('Authorization', `Bearer ${operatorToken}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .get('/api/v1/vehicles')
+        .set('Authorization', `Bearer ${operatorToken}`)
+        .expect(200);
+    }
+
+    const statsRes = await request(app.getHttpServer())
+      .get('/api/v1/health/cache')
+      .set('Authorization', `Bearer ${operatorToken}`)
+      .expect(200);
+
+    expect(statsRes.body.hits).toBeGreaterThanOrEqual(6);
+    expect(statsRes.body.hitRatePct).toBeGreaterThan(50);
+    expect(statsRes.body.byNamespace.parking).toBeDefined();
+    expect(statsRes.body.byNamespace.vehicles).toBeDefined();
+    expect(statsRes.body.byNamespace.auth).toBeDefined();
+
+    // Non-admin (viewer) cannot flush cache
+    await request(app.getHttpServer())
+      .post('/api/v1/health/cache/flush')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(403);
   });
 
   it('rotates refresh tokens and revokes family on token reuse', async () => {
@@ -77,12 +132,12 @@ describe('Auto Park Backend E2E (Safety, Security, Industrial Control)', () => {
     await request(app.getHttpServer()).post('/api/v1/auth/refresh').send({ refreshToken: rt2 }).expect(401);
   });
 
-  it('enforces RBAC: Read-Only and Customer cannot access admin/config endpoints or control other vehicles', async () => {
+  it('enforces RBAC & SSRF protection: blocks unauthorized users and unsafe VNC hosts/ports', async () => {
     // Viewer cannot request parking
     await request(app.getHttpServer())
       .post('/api/v1/parking/request')
       .set('Authorization', `Bearer ${viewerToken}`)
-      .send({ plateNumber: 'ABC 1234' })
+      .send({ plateNumber: '10-45821' })
       .expect(403);
 
     // Customer cannot view or change industrial config
@@ -91,45 +146,74 @@ describe('Auto Park Backend E2E (Safety, Security, Industrial Control)', () => {
       .set('Authorization', `Bearer ${customerToken}`)
       .expect(403);
 
-    // Customer cannot park operator's vehicle (RYD 5500)
+    // Customer cannot park operator's vehicle (15-30492)
     await request(app.getHttpServer())
       .post('/api/v1/parking/request')
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ plateNumber: 'RYD 5500' })
+      .send({ plateNumber: '15-30492' })
       .expect(403);
+
+    // VNC SSRF guard: cloud metadata IP & public internet IPs must be rejected even for Super Admin
+    await request(app.getHttpServer())
+      .post('/api/v1/industrial/vnc/connect')
+      .set('Authorization', `Bearer ${superAdminToken}`)
+      .send({ host: '169.254.169.254', port: 5900 })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/industrial/vnc/connect')
+      .set('Authorization', `Bearer ${superAdminToken}`)
+      .send({ host: '8.8.8.8', port: 5900 })
+      .expect(400);
+
+    // Non-VNC port (e.g., PostgreSQL 5432 or SSH 22) must be rejected by DTO validation
+    await request(app.getHttpServer())
+      .post('/api/v1/industrial/vnc/connect')
+      .set('Authorization', `Bearer ${superAdminToken}`)
+      .send({ host: '192.168.0.30', port: 22 })
+      .expect(400);
   });
 
-  it('rejects invalid vehicle, already-parked vehicle on PARK, and non-parked vehicle on RETRIEVE', async () => {
+  it('rejects invalid vehicle, non-parked vehicle on RETRIEVE, and already-parked vehicle on PARK', async () => {
     // Unknown vehicle for customer
     const nf = await request(app.getHttpServer())
       .post('/api/v1/parking/request')
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ plateNumber: 'NON EXISTENT' })
+      .send({ plateNumber: '99-99999' })
       .expect(404);
     expect(nf.body.code).toBe('VEHICLE_NOT_FOUND');
 
-    // KSA 9080 is already parked in L1-A02
-    const ap = await request(app.getHttpServer())
-      .post('/api/v1/parking/request')
-      .set('Authorization', `Bearer ${customerToken}`)
-      .send({ plateNumber: 'KSA 9080' })
-      .expect(409);
-    expect(ap.body.code).toBe('VEHICLE_ALREADY_PARKED');
-
-    // ABC 1234 is not parked yet -> cannot retrieve
+    // 10-45821 is not parked yet -> cannot retrieve
     const np = await request(app.getHttpServer())
       .post('/api/v1/parking/retrieve')
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ plateNumber: 'ABC 1234' })
+      .send({ plateNumber: '10-45821' })
       .expect(409);
     expect(np.body.code).toBe('VEHICLE_NOT_PARKED');
+
+    // Park 22-78910 into L21 and wait for completion
+    const parkRes = await request(app.getHttpServer())
+      .post('/api/v1/parking/request')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({ plateNumber: '22-78910', targetSpaceNumber: 'L21' })
+      .expect(201);
+    const done = await waitForCompletion(parkRes.body.id, customerToken);
+    expect(done.status).toBe('COMPLETED');
+
+    // Attempting to park 22-78910 again must fail with VEHICLE_ALREADY_PARKED
+    const ap = await request(app.getHttpServer())
+      .post('/api/v1/parking/request')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({ plateNumber: '22-78910' })
+      .expect(409);
+    expect(ap.body.code).toBe('VEHICLE_ALREADY_PARKED');
   });
 
   it('executes full PARK -> COMPLETED and RETRIEVE -> COMPLETED lifecycle and prevents duplicate commands', async () => {
     const createRes = await request(app.getHttpServer())
       .post('/api/v1/parking/request')
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ plateNumber: 'ABC 1234' })
+      .send({ plateNumber: '10-45821' })
       .expect(201);
 
     const reqId = createRes.body.id;
@@ -143,49 +227,26 @@ describe('Auto Park Backend E2E (Safety, Security, Industrial Control)', () => {
     const dupRes = await request(app.getHttpServer())
       .post('/api/v1/parking/request')
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ plateNumber: 'ABC 1234' })
+      .send({ plateNumber: '10-45821' })
       .expect(409);
     expect(['DUPLICATE_REQUEST', 'MACHINE_BUSY']).toContain(dupRes.body.code);
 
-    // Wait for mock controller to finish parking
-    let completed = false;
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 150));
-      const poll = await request(app.getHttpServer())
-        .get(`/api/v1/parking/requests/${reqId}`)
-        .set('Authorization', `Bearer ${customerToken}`)
-        .expect(200);
-      if (poll.body.status === 'COMPLETED') {
-        completed = true;
-        const finalStep = poll.body.steps.find((s: { key: string }) => s.key === 'PARKING_COMPLETED');
-        expect(finalStep.status).toBe('DONE');
-        break;
-      }
-    }
-    expect(completed).toBe(true);
+    const parkDone = await waitForCompletion(reqId, customerToken);
+    expect(parkDone.status).toBe('COMPLETED');
+    const finalStep = parkDone.steps.find((s: { key: string }) => s.key === 'PARKING_COMPLETED');
+    expect(finalStep.status).toBe('DONE');
 
-    // Now retrieve ABC 1234
+    // Now retrieve 10-45821
     const retRes = await request(app.getHttpServer())
       .post('/api/v1/parking/retrieve')
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ plateNumber: 'ABC 1234' })
+      .send({ plateNumber: '10-45821' })
       .expect(201);
 
-    let retCompleted = false;
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 150));
-      const poll = await request(app.getHttpServer())
-        .get(`/api/v1/parking/requests/${retRes.body.id}`)
-        .set('Authorization', `Bearer ${customerToken}`)
-        .expect(200);
-      if (poll.body.status === 'COMPLETED') {
-        retCompleted = true;
-        const finalStep = poll.body.steps.find((s: { key: string }) => s.key === 'VEHICLE_READY');
-        expect(finalStep.status).toBe('DONE');
-        break;
-      }
-    }
-    expect(retCompleted).toBe(true);
+    const retDone = await waitForCompletion(retRes.body.id, customerToken);
+    expect(retDone.status).toBe('COMPLETED');
+    const retFinalStep = retDone.steps.find((s: { key: string }) => s.key === 'VEHICLE_READY');
+    expect(retFinalStep.status).toBe('DONE');
   });
 
   it('handles controller offline, critical alarm interlock, acknowledgement, and command timeout safely', async () => {
@@ -199,7 +260,7 @@ describe('Auto Park Backend E2E (Safety, Security, Industrial Control)', () => {
     const offRes = await request(app.getHttpServer())
       .post('/api/v1/parking/request')
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ plateNumber: 'ABC 1234' })
+      .send({ plateNumber: '10-45821' })
       .expect(409);
     expect(offRes.body.code).toBe('SYSTEM_OFFLINE');
 
@@ -235,7 +296,7 @@ describe('Auto Park Backend E2E (Safety, Security, Industrial Control)', () => {
     const critRes = await request(app.getHttpServer())
       .post('/api/v1/parking/request')
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ plateNumber: 'ABC 1234' })
+      .send({ plateNumber: '10-45821' })
       .expect(409);
     expect(['CRITICAL_ALARM_ACTIVE', 'SAFETY_INTERLOCK', 'SYSTEM_NOT_READY']).toContain(critRes.body.code);
 
@@ -256,7 +317,7 @@ describe('Auto Park Backend E2E (Safety, Security, Industrial Control)', () => {
     const toReq = await request(app.getHttpServer())
       .post('/api/v1/parking/request')
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ plateNumber: 'ABC 1234' })
+      .send({ plateNumber: '10-45821' })
       .expect(201);
 
     await new Promise((r) => setTimeout(r, 1600));
@@ -274,20 +335,29 @@ describe('Auto Park Backend E2E (Safety, Security, Industrial Control)', () => {
       .set('Authorization', `Bearer ${superAdminToken}`)
       .send({
         protocol: 'MOCK',
-        plcModel: 'S7-1500 (Pending Supplier Info)',
-        host: '192.168.0.10',
+        plcModel: 'Siemens S7-1200 (192.168.0.27:102)',
+        host: '192.168.0.27',
         port: 102,
         rack: 0,
         slot: 1,
         opcuaPassword: 'SuperSecretPlcPassword',
         tagMap: {
-          system_ready_tag: { address: 'DB10,X0.0', dataType: 'BOOL', access: 'R' },
+          system_ready_tag: { address: 'DB1,X0.3', dataType: 'BOOL', access: 'R' },
         },
       })
       .expect(200);
 
-    expect(updated.body.host).toBe('192.168.0.10');
+    expect(updated.body.host).toBe('192.168.0.27');
     expect(updated.body.opcuaPassword).toBe('********');
-    expect(updated.body.tagMap.system_ready_tag.address).toBe('DB10,X0.0');
+    expect(updated.body.tagMap.system_ready_tag.address).toBe('DB1,X0.3');
+  });
+
+  it('exports history CSV with formula-injection protection', async () => {
+    const csvRes = await request(app.getHttpServer())
+      .get('/api/v1/history/export')
+      .set('Authorization', `Bearer ${operatorToken}`)
+      .expect(200);
+    expect(csvRes.headers['content-type']).toContain('text/csv');
+    expect(csvRes.text).toContain('id,kind,title,description,plateNumber,status,actor,createdAt');
   });
 });

@@ -91,7 +91,11 @@ export class IndustrialControllerHttp {
   ) {
     const action = body?.action;
     if (!action) throw new BadRequestException('action is required');
-    if (action !== 'ESTOP_ON' && !hasPermission(user.role, Permission.ALARMS_ACKNOWLEDGE)) {
+    if (
+      action !== 'ESTOP_ON' &&
+      !(action === 'RETURN_PARK' && hasPermission(user.role, Permission.PARKING_REQUEST)) &&
+      !hasPermission(user.role, Permission.ALARMS_ACKNOWLEDGE)
+    ) {
       throw new ForbiddenException(
         'Only authorized supervisors/engineers can release Emergency Stop. / إلغاء إيقاف الطوارئ مقتصر على المشرفين أو مدير النظام فقط.',
       );

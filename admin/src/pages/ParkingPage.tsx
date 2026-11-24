@@ -69,6 +69,11 @@ export function canCancelParkingRequest(req: ParkingRequest): boolean {
   return CANCELLABLE_CMD_STATUSES.includes(req.command.status);
 }
 
+/** Sorts tower bays top-to-bottom (P3 Top -> P2 Mid -> P1 Bottom) to match the physical lift & Siemens KTP400 HMI. */
+export function sortTowerSpacesTopDown<T extends { level: number }>(spaces: T[]): T[] {
+  return [...spaces].sort((a, b) => b.level - a.level);
+}
+
 const SPACE_BORDER_COLOR: Record<SpaceStatus, string> = {
   AVAILABLE: '#22c55e',
   OCCUPIED: '#3b82f6',
@@ -104,6 +109,7 @@ export const ParkingPage: React.FC = () => {
   const [inputMode, setInputMode] = useState<'vehicle' | 'plate'>('vehicle');
   const [vehicleId, setVehicleId] = useState<string>('');
   const [plateNumber, setPlateNumber] = useState<string>('');
+  const [targetSpaceNumber, setTargetSpaceNumber] = useState<string>('');
   const [confirmStep, setConfirmStep] = useState<boolean>(false);
 
   const canCreateRequest = canAny(['parking.request', 'parking.request.any']);
@@ -151,8 +157,10 @@ export const ParkingPage: React.FC = () => {
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const payload = inputMode === 'vehicle' ? { vehicleId } : { plateNumber: plateNumber.trim().toUpperCase() };
-      return createType === 'PARK' ? parkingApi.park(payload) : parkingApi.retrieve(payload);
+      const base = inputMode === 'vehicle' ? { vehicleId } : { plateNumber: plateNumber.trim().toUpperCase() };
+      return createType === 'PARK'
+        ? parkingApi.park(targetSpaceNumber ? { ...base, targetSpaceNumber } : base)
+        : parkingApi.retrieve(base);
     },
     onSuccess: (created) => {
       notify(t('requests.created', { number: created.requestNumber }), 'success');
@@ -160,6 +168,7 @@ export const ParkingPage: React.FC = () => {
       setConfirmStep(false);
       setVehicleId('');
       setPlateNumber('');
+      setTargetSpaceNumber('');
       setSelectedRequestId(created.id);
       void queryClient.invalidateQueries({ queryKey: ['parkingRequests'] });
       void queryClient.invalidateQueries({ queryKey: ['parkingSpaces'] });
@@ -200,6 +209,7 @@ export const ParkingPage: React.FC = () => {
                 startIcon={<AddIcon />}
                 onClick={() => {
                   setCreateType('PARK');
+                  setTargetSpaceNumber('');
                   setConfirmStep(false);
                 }}
               >
@@ -211,6 +221,7 @@ export const ParkingPage: React.FC = () => {
                 startIcon={<CarIcon />}
                 onClick={() => {
                   setCreateType('RETRIEVE');
+                  setTargetSpaceNumber('');
                   setConfirmStep(false);
                 }}
               >
@@ -305,12 +316,15 @@ export const ParkingPage: React.FC = () => {
         ) : (
           <Grid container spacing={2}>
             {['Lane 1', 'Lane 2', 'Lane 3', 'Lane 4'].map((laneName, colIdx) => {
-              const stackSpaces = allSpaces
-                .filter((s) => s.zone === laneName || (!s.zone.startsWith('Lane') && Math.floor(allSpaces.indexOf(s) / 3) === colIdx))
-                .sort((a, b) => a.level - b.level);
+              const stackSpaces = sortTowerSpacesTopDown(
+                allSpaces.filter(
+                  (s) =>
+                    s.zone === laneName || (!s.zone.startsWith('Lane') && Math.floor(allSpaces.indexOf(s) / 3) === colIdx),
+                ),
+              );
               if (stackSpaces.length === 0) return null;
-              const firstNum = stackSpaces[0]?.spaceNumber ?? '';
-              const lastNum = stackSpaces[stackSpaces.length - 1]?.spaceNumber ?? '';
+              const topNum = stackSpaces[0]?.spaceNumber ?? '';
+              const bottomNum = stackSpaces[stackSpaces.length - 1]?.spaceNumber ?? '';
               return (
                 <Grid key={laneName} size={{ xs: 12, sm: 6, md: 3 }}>
                   <Paper
@@ -329,9 +343,9 @@ export const ParkingPage: React.FC = () => {
                       sx={{ mb: 1.2, px: 0.5 }}
                     >
                       <Typography variant="caption" fontWeight={800} color="primary.main">
-                        {`${laneName} (${firstNum} – ${lastNum})`}
+                        {`${laneName} (${topNum} ↓ ${bottomNum})`}
                       </Typography>
-                      <Chip size="small" label={`P1..P${stackSpaces.length}`} variant="outlined" />
+                      <Chip size="small" label={`P${stackSpaces.length}..P1`} variant="outlined" />
                     </Stack>
                     <Stack spacing={1.25}>
                       {stackSpaces.map((sp) => (
@@ -549,6 +563,21 @@ export const ParkingPage: React.FC = () => {
               </Stack>
             </DialogContent>
             <DialogActions>
+              {selectedSpace.status === 'AVAILABLE' && canCreateRequest && (
+                <Button
+                  color="primary"
+                  variant="contained"
+                  onClick={() => {
+                    const target = selectedSpace.spaceNumber;
+                    setSelectedSpace(null);
+                    setCreateType('PARK');
+                    setTargetSpaceNumber(target);
+                    setConfirmStep(false);
+                  }}
+                >
+                  {t('parking.newPark')} ({selectedSpace.spaceNumber})
+                </Button>
+              )}
               {selectedSpace.vehicle && canCreateRequest && (
                 <Button
                   color="secondary"
@@ -557,6 +586,7 @@ export const ParkingPage: React.FC = () => {
                     const plate = selectedSpace.vehicle!.plateNumber;
                     setSelectedSpace(null);
                     setCreateType('RETRIEVE');
+                    setTargetSpaceNumber('');
                     setInputMode('plate');
                     setPlateNumber(plate);
                     setConfirmStep(false);
