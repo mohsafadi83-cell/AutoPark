@@ -203,11 +203,11 @@ export class ParkingService implements OnModuleInit, OnModuleDestroy {
   ) {
     // Steps 1 & 2: User authentication & permission check
     const canAny = hasPermission(user.role, Permission.PARKING_REQUEST_ANY);
-    if (!dto.vehicleId && !dto.plateNumber) {
-      throw AppError.badRequest('Either vehicleId or plateNumber must be provided');
+    if (!dto.vehicleId && !dto.plateNumber && !dto.targetSpaceNumber) {
+      throw AppError.badRequest('Either targetSpaceNumber, vehicleId, or plateNumber must be provided');
     }
 
-    // Step 3: Input validation & vehicle lookup
+    // Step 3: Input validation & vehicle lookup (supports direct bay selection without plate number)
     let vehicle: VehicleEntity | null = null;
     if (dto.vehicleId) {
       vehicle = await this.vehRepo.findOne({ where: { id: dto.vehicleId, deletedAt: IsNull() } });
@@ -224,6 +224,26 @@ export class ParkingService implements OnModuleInit, OnModuleDestroy {
           model: null,
           color: null,
         });
+      }
+    } else if (dto.targetSpaceNumber) {
+      const sn = dto.targetSpaceNumber.trim().toUpperCase();
+      if (type === RequestType.RETRIEVE) {
+        const sp = await this.spaceRepo.findOne({ where: { spaceNumber: sn }, relations: ['vehicle'] });
+        vehicle = sp?.vehicle ?? null;
+      } else {
+        // Direct bay park without plate: reuse/create a clean bay-associated record (BAY-Lxx)
+        const bayPlate = `BAY-${sn}`;
+        vehicle = await this.vehRepo.findOne({ where: { plateNumber: bayPlate, deletedAt: IsNull() } });
+        if (!vehicle) {
+          vehicle = await this.vehRepo.save({
+            userId: user.id,
+            plateNumber: bayPlate,
+            vehicleType: 'SEDAN',
+            brand: 'AutoPark',
+            model: sn,
+            color: null,
+          });
+        }
       }
     }
     if (!vehicle) throw AppError.notFound('Vehicle', 'VEHICLE_NOT_FOUND');

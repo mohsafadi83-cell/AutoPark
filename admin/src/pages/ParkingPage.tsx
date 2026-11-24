@@ -565,34 +565,45 @@ export const ParkingPage: React.FC = () => {
             <DialogActions>
               {selectedSpace.status === 'AVAILABLE' && canCreateRequest && (
                 <Button
-                  color="primary"
+                  color="success"
                   variant="contained"
-                  onClick={() => {
+                  disabled={createMutation.isPending}
+                  onClick={async () => {
                     const target = selectedSpace.spaceNumber;
                     setSelectedSpace(null);
-                    setCreateType('PARK');
-                    setTargetSpaceNumber(target);
-                    setConfirmStep(false);
+                    try {
+                      await parkingApi.park({ targetSpaceNumber: target });
+                      notify(`${t('parking.newPark')} (${target})`, 'success');
+                      queryClient.invalidateQueries({ queryKey: ['parkingSpaces'] });
+                      queryClient.invalidateQueries({ queryKey: ['parkingRequests'] });
+                    } catch (err) {
+                      notify(errorMessage(err), 'error');
+                    }
                   }}
                 >
                   {t('parking.newPark')} ({selectedSpace.spaceNumber})
                 </Button>
               )}
-              {selectedSpace.vehicle && canCreateRequest && (
+              {(selectedSpace.status === 'OCCUPIED' || selectedSpace.vehicle) && canCreateRequest && (
                 <Button
                   color="secondary"
                   variant="contained"
-                  onClick={() => {
-                    const plate = selectedSpace.vehicle!.plateNumber;
+                  disabled={createMutation.isPending}
+                  onClick={async () => {
+                    const target = selectedSpace.spaceNumber;
+                    const plate = selectedSpace.vehicle?.plateNumber;
                     setSelectedSpace(null);
-                    setCreateType('RETRIEVE');
-                    setTargetSpaceNumber('');
-                    setInputMode('plate');
-                    setPlateNumber(plate);
-                    setConfirmStep(false);
+                    try {
+                      await parkingApi.retrieve(plate ? { plateNumber: plate, targetSpaceNumber: target } : { targetSpaceNumber: target });
+                      notify(`${t('parking.newRetrieve')} (${target})`, 'success');
+                      queryClient.invalidateQueries({ queryKey: ['parkingSpaces'] });
+                      queryClient.invalidateQueries({ queryKey: ['parkingRequests'] });
+                    } catch (err) {
+                      notify(errorMessage(err), 'error');
+                    }
                   }}
                 >
-                  {t('parking.newRetrieve')}
+                  {t('parking.newRetrieve')} ({selectedSpace.spaceNumber})
                 </Button>
               )}
               <Button onClick={() => setSelectedSpace(null)}>{t('common.close')}</Button>

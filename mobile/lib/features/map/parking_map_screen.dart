@@ -25,15 +25,7 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
   String? _selectedZone;
   SpaceStatus? _selectedStatus;
   String? _selectedSpaceNumber;
-  String? _selectedVehicleId;
-  final _manualPlateCtrl = TextEditingController();
   bool _submitting = false;
-
-  @override
-  void dispose() {
-    _manualPlateCtrl.dispose();
-    super.dispose();
-  }
 
   String _floorDescription(int level, bool isAr) {
     switch (level) {
@@ -53,28 +45,6 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
     final l10n = AppLocalizations.of(context);
     final isAr = Localizations.localeOf(context).languageCode == 'ar';
     final messenger = ScaffoldMessenger.of(context);
-    final appState = ref.read(appControllerProvider);
-    final vehicles = appState.vehicles;
-
-    String? vehicleId = _selectedVehicleId;
-    if (isPark && (vehicleId == null || !vehicles.any((v) => v.id == vehicleId))) {
-      vehicleId = vehicles.isNotEmpty ? vehicles.first.id : null;
-    }
-    final manualPlate = _manualPlateCtrl.text.trim().toUpperCase();
-    final useManual = manualPlate.isNotEmpty;
-
-    if (isPark && !useManual && (vehicleId == null || vehicleId.isEmpty)) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            isAr
-                ? 'اختر مركبة مسجلة أو أدخل رقم اللوحة قبل استدعاء المصعد'
-                : 'Select a registered vehicle or enter a plate number first',
-          ),
-        ),
-      );
-      return;
-    }
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -152,8 +122,6 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
       final api = ref.read(appControllerProvider.notifier).api;
       final req = isPark
           ? await api.requestPark(
-              vehicleId: useManual ? null : vehicleId,
-              plateNumber: useManual ? manualPlate : null,
               targetSpaceNumber: space.spaceNumber,
             )
           : await api.requestRetrieve(
@@ -162,7 +130,6 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
             );
       ref.read(appControllerProvider.notifier).upsertRequest(req);
       await ref.read(appControllerProvider.notifier).refreshAllData();
-      _manualPlateCtrl.clear();
       if (mounted) {
         messenger.showSnackBar(
           SnackBar(
@@ -306,7 +273,6 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
     final canRequest = (user?.canRequestParking ?? false) &&
         appState.canDispatchCommands &&
         !_submitting;
-    final canManualPlate = user?.canRequestAnyVehicle ?? false;
 
     final levels = (appState.dashboard?.levels.isNotEmpty ?? false)
         ? appState.dashboard!.levels
@@ -684,53 +650,6 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
                     ],
                     const SizedBox(height: 12),
                     if (selectedSpace.status == SpaceStatus.available) ...[
-                      if (appState.vehicles.isNotEmpty) ...[
-                        DropdownButtonFormField<String>(
-                          value: appState.vehicles
-                                  .any((v) => v.id == _selectedVehicleId)
-                              ? _selectedVehicleId
-                              : appState.vehicles.first.id,
-                          decoration: InputDecoration(
-                            labelText: isAr
-                                ? 'المركبة المسجلة'
-                                : 'Registered Vehicle',
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                          ),
-                          items: [
-                            for (final v in appState.vehicles)
-                              DropdownMenuItem(
-                                value: v.id,
-                                child: Text(v.displayName),
-                              ),
-                          ],
-                          onChanged: _submitting
-                              ? null
-                              : (val) =>
-                                  setState(() => _selectedVehicleId = val),
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-                      if (canManualPlate || appState.vehicles.isEmpty) ...[
-                        TextField(
-                          controller: _manualPlateCtrl,
-                          enabled: !_submitting,
-                          textCapitalization: TextCapitalization.characters,
-                          decoration: InputDecoration(
-                            labelText: isAr
-                                ? 'أو أدخل رقم اللوحة يدوياً (اختياري)'
-                                : 'Or enter plate number manually (optional)',
-                            hintText: '10-45821',
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
                       ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF16A34A),

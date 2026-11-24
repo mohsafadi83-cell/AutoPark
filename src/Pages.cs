@@ -870,8 +870,16 @@ namespace AutoPark
 
             if (string.IsNullOrEmpty(_chosenPlate))
             {
-                Loc.ShowMsg("Please select a vehicle or enter a plate number.", "يرجى اختيار مركبة أو إدخال رقم اللوحة الأردنية.", "Notice", "تنبيه", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                if (_targetSpace != null)
+                {
+                    _chosenPlate = !string.IsNullOrEmpty(_targetSpace.PlateNumber)
+                        ? _targetSpace.PlateNumber
+                        : ("BAY-" + _targetSpace.SpaceNumber);
+                }
+                else
+                {
+                    _chosenPlate = "AUTO-" + DateTime.Now.ToString("HHmmss");
+                }
             }
 
             if (_opType == "PARK")
