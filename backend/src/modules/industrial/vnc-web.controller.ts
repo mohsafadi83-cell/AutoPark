@@ -1,41 +1,83 @@
 import { Body, Controller, Get, HttpCode, Injectable, Logger, OnModuleDestroy, Post, Res } from '@nestjs/common';
-import { execFileSync } from 'child_process';
+import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { Response } from 'express';
 import * as net from 'net';
-import { RequirePermissions } from '../../common/decorators';
+import { AuthUser, CurrentUser, ReqMeta, RequestMeta, RequirePermissions } from '../../common/decorators';
+import { AppError } from '../../common/errors';
 import { Permission } from '../../common/permissions';
+import { AuditService } from '../audit/audit.module';
+import { encryptVncChallengeDes } from './vnc-des';
+
+export class VncConnectDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  host?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(5800)
+  @Max(5999)
+  port?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  password?: string;
+}
+
+export class VncPointerDto {
+  @IsInt()
+  @Min(0)
+  @Max(4096)
+  x: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(4096)
+  y: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(255)
+  mask: number;
+}
+
+export class VncTapDto {
+  @IsString()
+  @MaxLength(32)
+  spot: string;
+}
 
 /**
- * Encrypts a 16-byte VNC challenge with the VNC password (bit-reversed 8-byte DES key in ECB mode).
- * Uses Windows .NET DESCryptoServiceProvider via a fast one-shot call so it works on Node 24 (OpenSSL 3) without legacy providers.
+ * Restricts VNC bridge targets to private industrial LAN (RFC 1918) or loopback hosts
+ * and standard RFB/Sm@rtServer ports (5800-5999) to prevent SSRF attacks.
  */
-function encryptVncChallengeDes(challenge: Buffer, password: string): Buffer {
-  const chalHex = challenge.toString('hex');
-  const pwB64 = Buffer.from(password || '', 'ascii').toString('base64');
-  const psScript = `
-    $chal = [byte[]]::new(16)
-    for($i=0;$i -lt 16;$i++){ $chal[$i] = [Convert]::ToByte('${chalHex}'.Substring($i*2,2),16) }
-    $pw = [System.Text.Encoding]::ASCII.GetBytes([System.Text.Encoding]::ASCII.GetString([Convert]::FromBase64String('${pwB64}')))
-    $key = [byte[]]::new(8)
-    for($i=0;$i -lt 8 -and $i -lt $pw.Length;$i++){
-      $b = $pw[$i]; $r = 0
-      for($bit=0;$bit -lt 8;$bit++){ if($b -band (1 -shl $bit)){ $r = $r -bor (1 -shl (7-$bit)) } }
-      $key[$i] = [byte]$r
+export function assertSafeVncTarget(host: string, port: number): void {
+  const cleanHost = (host || '').trim().toLowerCase();
+  const isLoopback = cleanHost === '127.0.0.1' || cleanHost === 'localhost';
+  const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(cleanHost);
+  let isPrivateLan = false;
+  if (ipv4Match) {
+    const [a, b, c, d] = ipv4Match.slice(1).map(Number);
+    const validOctets = [a, b, c, d].every((n) => n >= 0 && n <= 255);
+    if (validOctets) {
+      isPrivateLan =
+        a === 10 ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168);
     }
-    $des = [System.Security.Cryptography.DES]::Create()
-    $des.Mode = [System.Security.Cryptography.CipherMode]::ECB
-    $des.Padding = [System.Security.Cryptography.PaddingMode]::None
-    $enc = $des.CreateEncryptor($key, [byte[]]::new(8))
-    $out = [byte[]]::new(16)
-    [void]$enc.TransformBlock($chal,0,8,$out,0)
-    [void]$enc.TransformBlock($chal,8,8,$out,8)
-    [BitConverter]::ToString($out).Replace('-','')
-  `;
-  const outHex = execFileSync('powershell.exe', ['-NoProfile', '-Command', psScript], {
-    encoding: 'utf8',
-    timeout: 4000,
-  }).trim();
-  return Buffer.from(outHex, 'hex');
+  }
+  if (!isLoopback && !isPrivateLan) {
+    throw AppError.badRequest(
+      `VNC target host "${host}" is blocked for security: only private industrial LAN (RFC 1918) or loopback addresses are permitted`,
+    );
+  }
+  if (!Number.isInteger(port) || port < 5800 || port > 5999) {
+    throw AppError.badRequest(
+      `VNC target port ${port} is blocked for security: only VNC/Sm@rtServer ports 5800-5999 are permitted`,
+    );
+  }
 }
 
 @Injectable()
@@ -93,6 +135,7 @@ export class VncBridgeService implements OnModuleDestroy {
     }
     // Map Siemens HTTP Java-applet port 5800 -> RFB VNC port 5900
     if (p >= 5800 && p < 5900) p += 100;
+    assertSafeVncTarget(h, p);
     this.host = h;
     this.port = p;
 
@@ -349,7 +392,10 @@ export class VncBridgeService implements OnModuleDestroy {
 @Controller('industrial/vnc')
 @RequirePermissions(Permission.CONFIG_MANAGE)
 export class VncWebController {
-  constructor(private readonly vnc: VncBridgeService) {}
+  constructor(
+    private readonly vnc: VncBridgeService,
+    private readonly audit: AuditService,
+  ) {}
 
   @Get('status')
   status() {
@@ -358,20 +404,49 @@ export class VncWebController {
 
   @Post('connect')
   @HttpCode(200)
-  connect(@Body() body: { host?: string; port?: number; password?: string }) {
-    return this.vnc.connect(body.host || '192.168.0.30', body.port || 5900, body.password || '');
+  async connect(
+    @Body() body: VncConnectDto,
+    @CurrentUser() user: AuthUser,
+    @ReqMeta() meta: RequestMeta,
+  ) {
+    const host = body.host || '192.168.0.30';
+    const port = body.port || 5900;
+    await this.audit.log({
+      userId: user.id,
+      username: user.username,
+      action: 'VNC_CONNECT',
+      entity: 'industrial_vnc',
+      ipAddress: meta.ip,
+      userAgent: meta.userAgent,
+      details: { host, port },
+    });
+    return this.vnc.connect(host, port, body.password || '');
   }
 
   @Post('pointer')
   @HttpCode(204)
-  pointer(@Body() body: { x: number; y: number; mask: number }) {
+  pointer(@Body() body: VncPointerDto) {
     this.vnc.sendPointer(body.x, body.y, body.mask);
   }
 
   @Post('tap')
   @HttpCode(200)
-  tap(@Body() body: { spot: string }) {
-    return this.vnc.tapSpot(body.spot);
+  async tap(
+    @Body() body: VncTapDto,
+    @CurrentUser() user: AuthUser,
+    @ReqMeta() meta: RequestMeta,
+  ) {
+    const result = await this.vnc.tapSpot(body.spot);
+    await this.audit.log({
+      userId: user.id,
+      username: user.username,
+      action: 'VNC_TAP',
+      entity: 'industrial_vnc',
+      ipAddress: meta.ip,
+      userAgent: meta.userAgent,
+      details: { spot: body.spot, x: result.x, y: result.y },
+    });
+    return result;
   }
 
   @Get('frame.bmp')
@@ -602,8 +677,11 @@ export class VncWebController {
         const db = d.dataBlocks || {};
         document.getElementById('plcKv').innerHTML = [
           'IB0=' + (d.inputs?.IB0 ?? 0),
+          'IB1=' + (d.inputs?.IB1 ?? 0),
           'IB2=' + (d.inputs?.IB2 ?? 0),
+          'IB3=' + (d.inputs?.IB3 ?? 0),
           'QB2=' + (d.outputs?.QB2 ?? 0),
+          'QB3=' + (d.outputs?.QB3 ?? 0),
           'MB3=' + (m.MB3 ?? 0),
           'MB7=' + (m.MB7 ?? 0),
           'MB9=' + (m.MB9 ?? 0),
@@ -614,10 +692,11 @@ export class VncWebController {
           'DB2=[' + (db.DB2 || []).join(',') + ']'
         ].map(x => '<span>' + x + '</span>').join('');
 
+        const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
         if (Array.isArray(d.recentChanges) && d.recentChanges.length > 0) {
           document.getElementById('plcChanges').innerHTML = d.recentChanges
             .slice(0, 12)
-            .map(c => '<div>[' + c.time.slice(11, 19) + '] <b style="color:#38bdf8">' + c.tag + '</b>: ' + JSON.stringify(c.from) + ' → <b style="color:#4ade80">' + JSON.stringify(c.to) + '</b></div>')
+            .map(c => '<div>[' + esc(String(c.time || '').slice(11, 19)) + '] <b style="color:#38bdf8">' + esc(c.tag) + '</b>: ' + esc(JSON.stringify(c.from)) + ' → <b style="color:#4ade80">' + esc(JSON.stringify(c.to)) + '</b></div>')
             .join('');
         }
       } catch {}

@@ -34,10 +34,10 @@ namespace AutoPark
         // Section 3: 4-Lane Limit Switch & Protection Matrix
         readonly Label[,] _laneCells = new Label[4, 6]; // BTM, MID, TOP, MG_PROT, CHECK_LOC, FLOOR
 
-        // Section 4: Raw Digital Inputs (I0.0..I2.7) & Outputs (Q0.0..Q2.7) + DB1/DB2 Live Bits
+        // Section 4: Raw Digital Inputs (I0.0..I3.7) & Outputs (Q0.0..Q3.7) + DB1/DB2 Live Bits
         readonly Label _lblRawBytes;
-        readonly Label[] _inLeds = new Label[24];
-        readonly Label[] _outLeds = new Label[24];
+        readonly Label[] _inLeds = new Label[32];
+        readonly Label[] _outLeds = new Label[32];
         readonly Label[] _dbBitChips;
         readonly string[] _dbBitKeys = new string[]
         {
@@ -107,7 +107,7 @@ namespace AutoPark
 
             var btnResetAlarm = new ModernButton
             {
-                Text = Loc.T("Reset Alarm Word", "تصفير Alarm Word"),
+                Text = Loc.T("Safe PLC Reset", "إعادة ضبط آمنة للـ PLC"),
                 IconGlyph = Icons.Shield,
                 BaseColor = Theme.Amber,
                 HoverColor = Color.FromArgb(180, 83, 9),
@@ -324,11 +324,12 @@ namespace AutoPark
             body.Controls.Add(laneCard);
 
             // ─── 5. Card D: Raw PLC Digital I/O (IB0..IB3, QB0..QB3) & Live DB1/DB2 Bits ───
-            var ioCard = new Card { Width = 1140, Height = 365, Padding = new Padding(16, 12, 16, 12), Margin = new Padding(0, 0, 0, 10) };
+            var ioCard = new Card { Width = 1140, Height = 425, Padding = new Padding(16, 12, 16, 12), Margin = new Padding(0, 0, 0, 10) };
             var ioTitle = Theme.Label(
-                Loc.T("4. Raw Siemens S7-1200 Digital Inputs (I0.0–I2.7), Outputs (Q0.0–Q2.7) & Live DB1/DB2 Control Bits",
-                      "4. مداخل ومخارج الـ PLC الخام (I0.0–I2.7 و Q0.0–Q2.7) وبتات التحكم الحية (DB1 / DB2 / M)"),
+                Loc.T("4. Raw Siemens S7-1200 Digital Inputs (I0.0–I3.7), Outputs (Q0.0–Q3.7) & Live DB1/DB2 Control Bits",
+                      "4. مداخل ومخارج الـ PLC الخام (I0.0–I3.7 و Q0.0–Q3.7) وبتات التحكم الحية (DB1 / DB2 / M)"),
                 Theme.Bold(10.8f), Theme.Ink);
+            ioTitle.UseMnemonic = false;
             ioTitle.Dock = DockStyle.Top;
             ioTitle.Height = 26;
 
@@ -338,13 +339,13 @@ namespace AutoPark
 
             var ioBody = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 4, 0, 0) };
 
-            var inRow = BuildLedRow(Loc.T("Inputs (I0.0–I2.7):", "المداخل (I0.0–I2.7):"), "I", _inLeds);
+            var inRow = BuildLedRow(Loc.T("Inputs (I0.0–I3.7):", "المداخل (I0.0–I3.7):"), "I", _inLeds);
             inRow.Dock = DockStyle.Top;
-            inRow.Height = 52;
+            inRow.Height = 76;
 
-            var outRow = BuildLedRow(Loc.T("Outputs (Q0.0–Q2.7):", "المخارج (Q0.0–Q2.7):"), "Q", _outLeds);
+            var outRow = BuildLedRow(Loc.T("Outputs (Q0.0–Q3.7):", "المخارج (Q0.0–Q3.7):"), "Q", _outLeds);
             outRow.Dock = DockStyle.Top;
-            outRow.Height = 52;
+            outRow.Height = 76;
 
             var dbGridTitle = Theme.Label(Loc.T("Live Manual & Handshake Bits (ParkIO_Data DB1 / ParkDB DB2 / %M):", "بتات التحكم اليدوي والتشغيل التلقائي الحية (DB1 / DB2 / %M):"), Theme.Bold(9.3f), Theme.Ink);
             dbGridTitle.Dock = DockStyle.Top;
@@ -467,16 +468,22 @@ namespace AutoPark
             lbl.Dock = DockStyle.Top;
             lbl.Height = 18;
 
-            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 24, RowCount = 1 };
-            for (int i = 0; i < 24; i++)
+            // 2 crisp rows x 16 columns: Row 0 = 0.0..1.7, Row 1 = 2.0..3.7 (all 32 bits clearly readable!)
+            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 16, RowCount = 2, RightToLeft = RightToLeft.No };
+            for (int c = 0; c < 16; c++) grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 16f));
+            grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
+            grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
+
+            for (int i = 0; i < targets.Length; i++)
             {
-                grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 24f));
                 int byteIdx = i / 8;
                 int bitIdx = i % 8;
+                int row = i / 16;
+                int col = i % 16;
                 var led = new Label
                 {
                     Text = prefix + byteIdx + "." + bitIdx,
-                    Font = new Font("Segoe UI", 7.2f, FontStyle.Bold),
+                    Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                     TextAlign = ContentAlignment.MiddleCenter,
                     Dock = DockStyle.Fill,
                     Margin = new Padding(1),
@@ -485,7 +492,7 @@ namespace AutoPark
                     BorderStyle = BorderStyle.FixedSingle
                 };
                 targets[i] = led;
-                grid.Controls.Add(led, i, 0);
+                grid.Controls.Add(led, col, row);
             }
             wrap.Controls.Add(grid);
             wrap.Controls.Add(lbl);
@@ -742,8 +749,8 @@ namespace AutoPark
                 "IB0={0}  IB1={1}  IB2={2}  IB3={3}   |   QB0={4}  QB1={5}  QB2={6}  QB3={7}   |   PLC Connected={8}",
                 ib0, ib1, ib2, ib3, qb0, qb1, qb2, qb3, plcConn ? "YES" : "NO");
 
-            UpdateLedBytes(_inLeds, new int[] { ib0, ib1, ib2 }, Theme.OkSoft, Theme.Ok);
-            UpdateLedBytes(_outLeds, new int[] { qb0, qb1, qb2 }, Theme.BlueSoft, Theme.Blue);
+            UpdateLedBytes(_inLeds, new int[] { ib0, ib1, ib2, ib3 }, Theme.OkSoft, Theme.Ok);
+            UpdateLedBytes(_outLeds, new int[] { qb0, qb1, qb2, qb3 }, Theme.BlueSoft, Theme.Blue);
 
             for (int i = 0; i < _dbBitKeys.Length; i++)
             {
@@ -770,13 +777,15 @@ namespace AutoPark
 
         void UpdateLedBytes(Label[] leds, int[] bytes, Color onBg, Color onFg)
         {
-            for (int b = 0; b < 3; b++)
+            for (int b = 0; b < bytes.Length; b++)
             {
                 int val = bytes[b] & 0xFF;
                 for (int bit = 0; bit < 8; bit++)
                 {
+                    int idx = b * 8 + bit;
+                    if (idx >= leds.Length) break;
                     bool on = (val & (1 << bit)) != 0;
-                    var led = leds[b * 8 + bit];
+                    var led = leds[idx];
                     led.BackColor = on ? onBg : Theme.Back;
                     led.ForeColor = on ? onFg : Theme.Muted;
                 }
@@ -837,28 +846,28 @@ namespace AutoPark
         void ResetAlarmWordAsync()
         {
             var confirm = Loc.ShowMsg(
-                "Reset latched PLC Alarm Word (DB2.DBW8 = 0, %M0.5 = false)?\nNote: If a physical Emergency Stop is still pressed, the PLC will re-latch it automatically.",
-                "هل تريد تصفير سجل الأعطال المعلق (DB2.DBW8 = 0 و %M0.5 = false)؟\nملاحظة: إذا كان زر الطوارئ الفيزيائي مضغوطاً فسيعيد الـ PLC تفعيله تلقائياً.",
-                "Reset PLC Alarm Word", "تصفير Alarm Word",
+                "Send Safe PLC Reset pulse (ParkDB.Reset DB2,X10.0 + %M0.5)?\nSafety Rule: Alarm Word (DB2,W8) is NEVER force-zeroed; only real hardware clearance clears faults.",
+                "هل تريد إرسال نبضة إعادة الضبط الآمنة للـ PLC (ParkDB.Reset DB2,X10.0 + %M0.5)؟\nقاعدة أمان: لا يتم تصفير كلمة الأعطال (DB2,W8) قسرياً مطلقاً لضمان السلامة الصناعية.",
+                "Safe PLC Reset", "إعادة ضبط آمنة للـ PLC",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (confirm != DialogResult.Yes) return;
 
             ThreadPool.QueueUserWorkItem(delegate
             {
                 var st = ParkState.Instance;
-                string r1 = st.PostApiRaw("/industrial/s7/write", "{\"address\":\"M0.5\",\"value\":false}");
-                string r2 = st.PostApiRaw("/industrial/s7/write", "{\"address\":\"DB2,W8\",\"value\":0}");
+                st.RecordLocalAudit("SAFE_RESET", "PLC", Loc.T("Safe ParkDB.Reset pulse from System Check", "نبضة ParkDB.Reset الآمنة من فحص النظام"), Loc.UserDisplay(_shell.CurrentUser));
+                string res = st.SendRecoveryAction("SAFE_RESET");
                 try
                 {
                     if (IsHandleCreated && !IsDisposed)
                     {
                         BeginInvoke((Action)delegate
                         {
-                            bool ok = r2 != null && r2.Contains("\"ok\":true");
+                            bool ok = res != null && res.Contains("\"ok\":true");
                             Loc.ShowMsg(
-                                ok ? "Alarm Word reset sent to PLC." : ("Reset failed: " + ShortErr(r2)),
-                                ok ? "تم إرسال أمر تصفير Alarm Word للـ PLC بنجاح." : ("فشل التصفير: " + ShortErr(r2)),
-                                "PLC Reset", "إعادة ضبط الـ PLC",
+                                ok ? "Safe Reset pulse (ParkDB.Reset) sent to PLC." : ("Safe Reset failed: " + ShortErr(res)),
+                                ok ? "تم إرسال نبضة إعادة الضبط الآمنة (ParkDB.Reset) إلى الـ PLC بنجاح." : ("فشل إرسال نبضة الضبط: " + ShortErr(res)),
+                                "Safe PLC Reset", "إعادة ضبط آمنة للـ PLC",
                                 MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
                             RunFullCheckAsync();
                         });

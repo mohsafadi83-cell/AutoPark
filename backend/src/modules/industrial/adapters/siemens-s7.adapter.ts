@@ -514,6 +514,7 @@ export class SiemensS7Adapter implements IndustrialController {
           ...this.decodeBits(Number(v.IB0 ?? 0), 'I0'),
           ...this.decodeBits(Number(v.IB1 ?? 0), 'I1'),
           ...this.decodeBits(Number(v.IB2 ?? 0), 'I2'),
+          ...this.decodeBits(Number(v.IB3 ?? 0), 'I3'),
         ],
       },
       outputs: {
@@ -525,6 +526,7 @@ export class SiemensS7Adapter implements IndustrialController {
           ...this.decodeBits(Number(v.QB0 ?? 0), 'Q0'),
           ...this.decodeBits(Number(v.QB1 ?? 0), 'Q1'),
           ...this.decodeBits(Number(v.QB2 ?? 0), 'Q2'),
+          ...this.decodeBits(Number(v.QB3 ?? 0), 'Q3'),
         ],
       },
       dataBlocks: {

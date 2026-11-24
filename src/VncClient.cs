@@ -91,12 +91,15 @@ namespace AutoPark
             leftInfo.Controls.Add(_lblModeBadge);
 
             var btnAuto = MakeTopBtn(Loc.T("AUTO Mode", "وضع تلقائي"), Icons.Check, Theme.Ok, Color.FromArgb(21, 128, 61), Color.White);
+            btnAuto.Enabled = shell.CurrentUser.CanMaintenance && !shell.Settings.ReadOnlyMode;
             btnAuto.Click += delegate { ExecuteModeSwitch(true); };
 
             var btnManual = MakeTopBtn(Loc.T("MANUAL Mode", "وضع يدوي"), Icons.Lock, Theme.Amber, Color.FromArgb(180, 83, 9), Color.White);
+            btnManual.Enabled = shell.CurrentUser.CanMaintenance && !shell.Settings.ReadOnlyMode;
             btnManual.Click += delegate { ExecuteModeSwitch(false); };
 
             var btnReset = MakeTopBtn(Loc.T("Safe Reset", "تصفير آمن"), Icons.Refresh, Theme.Blue, Color.FromArgb(29, 78, 216), Color.White);
+            btnReset.Enabled = shell.CurrentUser.CanAcknowledgeAlarms && !shell.Settings.ReadOnlyMode;
             btnReset.Click += delegate { ExecuteSafeReset(); };
 
             topCard.Controls.Add(leftInfo);
@@ -189,9 +192,11 @@ namespace AutoPark
             };
 
             var btnParkIn = MakeTopBtn(Loc.T("Park IN (Selected)", "إيداع في المصف"), Icons.Park, Theme.Primary, Theme.PrimaryHover, Color.White);
+            btnParkIn.Enabled = shell.CurrentUser.CanControl && !shell.Settings.ReadOnlyMode;
             btnParkIn.Click += delegate { ExecuteDirectBayOp(true); };
 
             var btnRetrieveOut = MakeTopBtn(Loc.T("Retrieve OUT", "استرجاع من المصف"), Icons.Car, Theme.Blue, Color.FromArgb(29, 78, 216), Color.White);
+            btnRetrieveOut.Enabled = shell.CurrentUser.CanControl && !shell.Settings.ReadOnlyMode;
             btnRetrieveOut.Click += delegate { ExecuteDirectBayOp(false); };
 
             hmiFooter.Controls.Add(Theme.Holder(btnRetrieveOut, endDock, 152, new Padding(6, 2, 0, 2)));
@@ -244,12 +249,15 @@ namespace AutoPark
             seqGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
 
             var btnStep1 = MakeGridBtn(Loc.T("Step 1 OK (DB2,X6.0)", "تأكيد الخطوة 1"), Theme.Primary);
+            btnStep1.Enabled = shell.CurrentUser.IsAdmin && !shell.Settings.ReadOnlyMode;
             btnStep1.Click += delegate { SendTagQuick("DB2,X6.0", 1, 350, "Park_Step1_OK"); };
 
             var btnStep2 = MakeGridBtn(Loc.T("Step 2 OK (DB2,X6.1)", "تأكيد الخطوة 2"), Theme.Primary);
+            btnStep2.Enabled = shell.CurrentUser.IsAdmin && !shell.Settings.ReadOnlyMode;
             btnStep2.Click += delegate { SendTagQuick("DB2,X6.1", 1, 350, "Park_Step2_OK"); };
 
             var btnOpenManual = MakeGridBtn(Loc.T("Manual Maintenance", "الصيانة اليدوية"), Theme.Blue);
+            btnOpenManual.Enabled = shell.CurrentUser.CanMaintenance;
             btnOpenManual.Click += delegate { _shell.Navigate(new ManualMaintenancePage(_shell), Loc.T("Safe Manual & Maintenance Mode (Hold-to-Run)", "وضع الصيانة والتحكم اليدوي الآمن")); };
 
             var btnOpenAlarms = MakeGridBtn(Loc.T("Industrial Alarms", "التنبيهات والأعطال"), Theme.Amber);
@@ -261,8 +269,8 @@ namespace AutoPark
             seqGrid.Controls.Add(btnOpenAlarms, 1, 1);
             rStack.Controls.Add(seqGrid);
 
-            // Direct S7-1200 PLC Tag Write Box
-            var lblPlcHead = Theme.Label(Loc.T("Direct S7-1200 Tag Write (No VNC)", "كتابة مباشرة لعناوين S7-1200 (بدون VNC)"), Theme.Bold(9.5f), Theme.Ink);
+            // Direct S7-1200 PLC Tag Write Box (Admin only)
+            var lblPlcHead = Theme.Label(Loc.T("Direct S7-1200 Tag Write (Admin Only)", "كتابة مباشرة لعناوين S7-1200 (للمدراء فقط)"), Theme.Bold(9.5f), Theme.Ink);
             lblPlcHead.Dock = DockStyle.Top;
             lblPlcHead.Height = 24;
             rStack.Controls.Add(lblPlcHead);
@@ -270,22 +278,24 @@ namespace AutoPark
             var tagRow = new Panel { Dock = DockStyle.Top, Height = 58, Margin = new Padding(0, 2, 0, 8) };
             var lblTag = Theme.Label(Loc.T("Tag Address (DB1,X0.3 / M10.0):", "العنوان (DB1,X0.3 / M10.0):"), Theme.F(8.5f), Theme.Muted);
             lblTag.SetBounds(0, 0, 210, 18);
-            _txtPlcTag = new TextBox { Text = "M10.0", Font = Theme.F(9.5f), RightToLeft = RightToLeft.No };
+            _txtPlcTag = new TextBox { Text = "M10.0", Font = Theme.F(9.5f), RightToLeft = RightToLeft.No, Enabled = shell.CurrentUser.IsAdmin && !shell.Settings.ReadOnlyMode };
             _txtPlcTag.SetBounds(0, 22, 140, 28);
 
             var lblVal = Theme.Label(Loc.T("Val:", "قيمة:"), Theme.F(8.5f), Theme.Muted);
             lblVal.SetBounds(146, 0, 48, 18);
-            _txtPlcVal = new TextBox { Text = "1", Font = Theme.F(9.5f), RightToLeft = RightToLeft.No };
+            _txtPlcVal = new TextBox { Text = "1", Font = Theme.F(9.5f), RightToLeft = RightToLeft.No, Enabled = shell.CurrentUser.IsAdmin && !shell.Settings.ReadOnlyMode };
             _txtPlcVal.SetBounds(146, 22, 48, 28);
 
             var btnPulse = MakeGridBtn(Loc.T("Pulse", "نبضة"), Theme.Primary);
             btnPulse.Dock = DockStyle.None;
             btnPulse.SetBounds(200, 19, 72, 32);
+            btnPulse.Enabled = shell.CurrentUser.IsAdmin && !shell.Settings.ReadOnlyMode;
             btnPulse.Click += delegate { SendPlcWrite(300); };
 
             var btnWrite = MakeGridBtn(Loc.T("Write", "كتابة"), Theme.Blue);
             btnWrite.Dock = DockStyle.None;
             btnWrite.SetBounds(276, 19, 70, 32);
+            btnWrite.Enabled = shell.CurrentUser.IsAdmin && !shell.Settings.ReadOnlyMode;
             btnWrite.Click += delegate { SendPlcWrite(0); };
 
             tagRow.Controls.AddRange(new Control[] { lblTag, _txtPlcTag, lblVal, _txtPlcVal, btnPulse, btnWrite });
@@ -533,6 +543,22 @@ namespace AutoPark
 
         void SendTagQuick(string addr, int val, int pulseMs, string label)
         {
+            if (!_shell.CurrentUser.IsAdmin || _shell.Settings.ReadOnlyMode)
+            {
+                SetStatus(Loc.T("Blocked: Admin permission required (or Read-Only mode active).", "ممنوع: يتطلب صلاحية مدير النظام (أو وضع القراءة فقط مفعّل)."), Theme.Err);
+                return;
+            }
+            if (ParkState.Instance.EmergencyStop)
+            {
+                SetStatus(Loc.T("Blocked: Emergency Stop is active!", "ممنوع: إيقاف الطوارئ مفعّل!"), Theme.Err);
+                return;
+            }
+            string upperAddr = (addr ?? "").Trim().ToUpperInvariant();
+            if (upperAddr.StartsWith("Q"))
+            {
+                SetStatus(Loc.T("SAFETY BLOCKED: Direct writes to physical PLC outputs (Q*) are forbidden!", "حظر أمان: يمنع الكتابة المباشرة على مخارج الـ PLC الفيزيائية (Q*)!"), Theme.Err);
+                return;
+            }
             ThreadPool.QueueUserWorkItem(delegate
             {
                 var st = ParkState.Instance;
@@ -589,8 +615,11 @@ namespace AutoPark
                     {
                         bool conn = json.IndexOf("\"connected\":true", StringComparison.OrdinalIgnoreCase) >= 0;
                         string ib0 = ExtractJsonInt(json, "IB0");
+                        string ib1 = ExtractJsonInt(json, "IB1");
                         string ib2 = ExtractJsonInt(json, "IB2");
+                        string ib3 = ExtractJsonInt(json, "IB3");
                         string qb2 = ExtractJsonInt(json, "QB2");
+                        string qb3 = ExtractJsonInt(json, "QB3");
                         string mb3 = ExtractJsonInt(json, "MB3");
                         string mb7 = ExtractJsonInt(json, "MB7");
                         string mb13 = ExtractJsonInt(json, "MB13");
@@ -600,8 +629,8 @@ namespace AutoPark
                             (conn ? "● S7-1200 ONLINE (192.168.0.27:102 — DIRECT)\r\n" : "● STANDALONE MODE (PLC OFFLINE — NO VNC)\r\n") +
                             "API Server : " + st.ApiBaseUrl + "\r\n" +
                             "Mode       : " + (st.Sensors.ManualMode ? "MANUAL" : "AUTO") + " | E-Stop: " + (st.EmergencyStop ? "ACTIVE" : "CLEAR") + "\r\n" +
-                            "Inputs     : IB0=" + ib0 + " | IB2=" + ib2 + " | QB2=" + qb2 + "\r\n" +
-                            "Merkers    : MB3=" + mb3 + " | MB7=" + mb7 + " | MB13=" + mb13 + " | MB60=" + mb60 + "\r\n" +
+                            "Inputs     : IB0=" + ib0 + " IB1=" + ib1 + " IB2=" + ib2 + " IB3=" + ib3 + "\r\n" +
+                            "Outputs    : QB2=" + qb2 + " QB3=" + qb3 + " | MB3=" + mb3 + " MB7=" + mb7 + " MB60=" + mb60 + "\r\n" +
                             "Alarm Word : " + st.Sensors.AlarmWord + " | Updated: " + DateTime.Now.ToString("HH:mm:ss");
                         col = conn ? Color.FromArgb(74, 222, 128) : Color.FromArgb(56, 189, 248);
                     }
