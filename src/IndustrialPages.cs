@@ -487,18 +487,24 @@ namespace AutoPark
     }
 
     /// <summary>
-    /// Protected Manual & Maintenance Mode (Hold-to-Run with auto-release, Watchdog, UP/DOWN interlock, L2 ResetBit fix).
+    /// Protected Manual & Maintenance Mode (Toggle ON/OFF controls with UP/DOWN interlock, Stop-All, and Auto-Mode safety release).
     /// </summary>
     class ManualMaintenancePage : Panel
     {
+        class ToggleBtnInfo
+        {
+            public ModernButton Button;
+            public string BaseText;
+            public Color OffColor;
+        }
+
         readonly MainForm _shell;
         readonly Label _lblStatus;
         readonly ModernButton _btnModeAuto;
         readonly ModernButton _btnModeManual;
         readonly Panel _controlsContainer;
-        readonly System.Windows.Forms.Timer _watchdogTimer;
-        string _activeHoldKey = null;
-        DateTime _holdStartedAt = DateTime.MinValue;
+        readonly Dictionary<string, bool> _toggleStates = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, ToggleBtnInfo> _toggleButtons = new Dictionary<string, ToggleBtnInfo>(StringComparer.OrdinalIgnoreCase);
         bool _manualEnabled = false;
 
         public ManualMaintenancePage(MainForm shell)
@@ -530,8 +536,8 @@ namespace AutoPark
                 Padding = new Padding(14, 6, 14, 6)
             };
             var lblWarn = Theme.Label(
-                Loc.T("⚠ Safe Hold-to-Run Maintenance Mode — All outputs release automatically on mouse-up, leave, focus loss, or 15s watchdog. All actions are audited.",
-                      "⚠ وضع الصيانة والتحكم اليدوي الآمن (Hold-to-Run) — جميع الحركات تتوقف تلقائياً بمجرد إفلات الزر أو خروج المؤشر، وتُسجّل في سجل التدقيق."),
+                Loc.T("⚠ Manual Maintenance Mode (Toggle) — Click any button to turn ON, click again to turn OFF. Returning to Auto Mode or closing this screen turns all outputs OFF. All actions are audited.",
+                      "⚠ وضع الصيانة والتحكم اليدوي (تبديل Toggle) — اضغط مرة للتشغيل واضغط مجدداً للإيقاف. العودة للوضع التلقائي أو إغلاق الشاشة يفصل جميع المخارج تلقائياً، وتُسجّل جميع العمليات في سجل التدقيق."),
                 Theme.Bold(9.8f), Theme.Amber);
             lblWarn.Dock = DockStyle.Fill;
             warnBar.Controls.Add(lblWarn);
@@ -588,8 +594,8 @@ namespace AutoPark
 
             var holdCard = new Card { Dock = DockStyle.Fill, Padding = new Padding(16), Margin = new Padding(6) };
             var holdTitle = Theme.Label(
-                Loc.T("Direct Hold-to-Run Controls (Press & Hold — Auto-releases on Mouse Up/Leave):",
-                      "التحكم اليدوي المباشر (اضغط مع الاستمرار Hold-to-Run — يفصل تلقائياً عند الإفلات):"),
+                Loc.T("Direct Manual Controls (Toggle — Click ON / Click OFF):",
+                      "التحكم اليدوي المباشر (تبديل Toggle — اضغط للتشغيل واضغط مجدداً للإيقاف):"),
                 Theme.Bold(10.5f), Theme.Primary);
             holdTitle.Dock = DockStyle.Top;
             holdTitle.Height = 28;
@@ -604,33 +610,25 @@ namespace AutoPark
             for (int c = 0; c < 4; c++) holdGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
             for (int r = 0; r < 4; r++) holdGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 25f));
 
-            holdGrid.Controls.Add(MakeHoldButton(Loc.T("⚡ Pump", "⚡ المضخة (Pump)"), "man_pump_tag", Theme.Primary), 0, 0);
-            holdGrid.Controls.Add(MakeHoldButton(Loc.T("⬆ Lift UP", "⬆ صعود (UP)"), "man_up_tag", Theme.Blue), 1, 0);
-            holdGrid.Controls.Add(MakeHoldButton(Loc.T("⬇ Lift DOWN", "⬇ نزول (DOWN)"), "man_down_tag", Color.FromArgb(30, 64, 175)), 2, 0);
-            holdGrid.Controls.Add(MakeHoldButton(Loc.T("🧱 Wall Valve", "🧱 الحاجز (Wall)"), "man_wall_tag", Theme.Purple), 3, 0);
+            holdGrid.Controls.Add(MakeToggleButton(Loc.T("⚡ Pump", "⚡ المضخة (Pump)"), "man_pump_tag", Theme.Primary), 0, 0);
+            holdGrid.Controls.Add(MakeToggleButton(Loc.T("⬆ Lift UP", "⬆ صعود (UP)"), "man_up_tag", Theme.Blue), 1, 0);
+            holdGrid.Controls.Add(MakeToggleButton(Loc.T("⬇ Lift DOWN", "⬇ نزول (DOWN)"), "man_down_tag", Color.FromArgb(30, 64, 175)), 2, 0);
+            holdGrid.Controls.Add(MakeToggleButton(Loc.T("🧱 Wall Valve", "🧱 الحاجز (Wall)"), "man_wall_tag", Theme.Purple), 3, 0);
 
-            holdGrid.Controls.Add(MakeHoldButton(Loc.T("🔧 Cutoff Valve", "🔧 صمام القطع (Cutoff)"), "man_cutoff_tag", Theme.Ink), 0, 1);
-            var btnAllowWall = new ModernButton
-            {
-                Text = Loc.T("🔓 Allow Wall Operation", "🔓 السماح بالحاجز (Allow Wall)"),
-                BaseColor = Theme.Amber,
-                HoverColor = Color.FromArgb(180, 83, 9),
-                Dock = DockStyle.Fill,
-                Margin = new Padding(5)
-            };
-            btnAllowWall.Click += delegate { ConfirmToggleSpecial("allow_wall_tag", Loc.T("Allow Wall Operation", "السماح بتشغيل الحاجز (Allow Wall)")); };
+            holdGrid.Controls.Add(MakeToggleButton(Loc.T("🔧 Cutoff Valve", "🔧 صمام القطع (Cutoff)"), "man_cutoff_tag", Theme.Ink), 0, 1);
+            var btnAllowWall = MakeToggleButton(Loc.T("🔓 Allow Wall Operation", "🔓 السماح بالحاجز (Allow Wall)"), "allow_wall_tag", Theme.Amber);
             holdGrid.Controls.Add(btnAllowWall, 1, 1);
             holdGrid.SetColumnSpan(btnAllowWall, 3);
 
-            holdGrid.Controls.Add(MakeHoldButton("🔒 Stopper S1", "man_s1_tag", Color.FromArgb(15, 118, 110)), 0, 2);
-            holdGrid.Controls.Add(MakeHoldButton("🔒 Stopper S2", "man_s2_tag", Color.FromArgb(15, 118, 110)), 1, 2);
-            holdGrid.Controls.Add(MakeHoldButton("🔒 Stopper S3", "man_s3_tag", Color.FromArgb(15, 118, 110)), 2, 2);
-            holdGrid.Controls.Add(MakeHoldButton("🔒 Stopper S4", "man_s4_tag", Color.FromArgb(15, 118, 110)), 3, 2);
+            holdGrid.Controls.Add(MakeToggleButton("🔒 Stopper S1", "man_s1_tag", Color.FromArgb(15, 118, 110)), 0, 2);
+            holdGrid.Controls.Add(MakeToggleButton("🔒 Stopper S2", "man_s2_tag", Color.FromArgb(15, 118, 110)), 1, 2);
+            holdGrid.Controls.Add(MakeToggleButton("🔒 Stopper S3", "man_s3_tag", Color.FromArgb(15, 118, 110)), 2, 2);
+            holdGrid.Controls.Add(MakeToggleButton("🔒 Stopper S4", "man_s4_tag", Color.FromArgb(15, 118, 110)), 3, 2);
 
-            holdGrid.Controls.Add(MakeHoldButton(Loc.T("🚗 Lane L1", "🚗 المسار L1"), "man_l1_tag", Color.FromArgb(51, 65, 85)), 0, 3);
-            holdGrid.Controls.Add(MakeHoldButton(Loc.T("🚗 Lane L2 (Safe)", "🚗 المسار L2 (آمن)"), "man_l2_tag", Color.FromArgb(51, 65, 85)), 1, 3);
-            holdGrid.Controls.Add(MakeHoldButton(Loc.T("🚗 Lane L3", "🚗 المسار L3"), "man_l3_tag", Color.FromArgb(51, 65, 85)), 2, 3);
-            holdGrid.Controls.Add(MakeHoldButton(Loc.T("🚗 Lane L4", "🚗 المسار L4"), "man_l4_tag", Color.FromArgb(51, 65, 85)), 3, 3);
+            holdGrid.Controls.Add(MakeToggleButton(Loc.T("🚗 Lane L1", "🚗 المسار L1"), "man_l1_tag", Color.FromArgb(51, 65, 85)), 0, 3);
+            holdGrid.Controls.Add(MakeToggleButton(Loc.T("🚗 Lane L2 (Safe)", "🚗 المسار L2 (آمن)"), "man_l2_tag", Color.FromArgb(51, 65, 85)), 1, 3);
+            holdGrid.Controls.Add(MakeToggleButton(Loc.T("🚗 Lane L3", "🚗 المسار L3"), "man_l3_tag", Color.FromArgb(51, 65, 85)), 2, 3);
+            holdGrid.Controls.Add(MakeToggleButton(Loc.T("🚗 Lane L4", "🚗 المسار L4"), "man_l4_tag", Color.FromArgb(51, 65, 85)), 3, 3);
 
             holdCard.Controls.Add(holdGrid);
             holdCard.Controls.Add(holdTitle);
@@ -697,96 +695,146 @@ namespace AutoPark
             Controls.Add(modeBar);
             Controls.Add(warnBar);
 
-            _watchdogTimer = new System.Windows.Forms.Timer { Interval = 500 };
-            _watchdogTimer.Tick += delegate
-            {
-                if (_activeHoldKey != null && (DateTime.Now - _holdStartedAt).TotalSeconds >= 15)
-                {
-                    ReleaseHold(_activeHoldKey, Loc.T("Auto-released after 15s (Safety Watchdog)", "تم الفصل التلقائي بعد 15 ثانية (Safety Watchdog)"));
-                }
-            };
-            _watchdogTimer.Start();
-
             Disposed += delegate
             {
-                _watchdogTimer.Stop();
-                if (_activeHoldKey != null) ReleaseHold(_activeHoldKey, Loc.T("Maintenance screen closed", "إغلاق شاشة الصيانة"));
+                if (HasAnyActiveToggle())
+                    ReleaseAllOutputs(Loc.T("Maintenance screen closed", "إغلاق شاشة الصيانة"));
                 if (_manualEnabled) SetManualMode(false);
             };
         }
 
-        ModernButton MakeHoldButton(string text, string controlKey, Color baseCol)
+        ModernButton MakeToggleButton(string text, string controlKey, Color baseCol)
         {
             var btn = new ModernButton
             {
                 Text = text,
                 BaseColor = baseCol,
                 HoverColor = ControlPaint.Dark(baseCol, 0.08f),
-                PressColor = Theme.Err,
+                PressColor = Theme.Ok,
                 ForeColor = Color.White,
                 Dock = DockStyle.Fill,
                 Margin = new Padding(5)
             };
 
-            btn.MouseDown += delegate (object s, MouseEventArgs e)
+            _toggleStates[controlKey] = false;
+            _toggleButtons[controlKey] = new ToggleBtnInfo
             {
-                if (e.Button != MouseButtons.Left || !_manualEnabled) return;
+                Button = btn,
+                BaseText = text,
+                OffColor = baseCol
+            };
+
+            string keyCopy = controlKey;
+            string textCopy = text;
+            btn.Click += delegate
+            {
+                if (!_manualEnabled) return;
                 if (ParkState.Instance.EmergencyStop)
                 {
                     _lblStatus.Text = Loc.T("🔴 Manual operation blocked while Emergency Stop is active!", "🔴 ممنوع التشغيل اليدوي أثناء تفعيل إيقاف الطوارئ!");
                     _lblStatus.ForeColor = Theme.Err;
                     return;
                 }
-                StartHold(controlKey, text);
+                bool nextState = !GetToggleState(keyCopy);
+                ToggleControl(keyCopy, textCopy, nextState);
             };
-            btn.MouseUp += delegate { ReleaseHold(controlKey, text); };
-            btn.MouseLeave += delegate { if (_activeHoldKey == controlKey) ReleaseHold(controlKey, text + Loc.T(" (pointer left)", " (خروج المؤشر)")); };
-            btn.LostFocus += delegate { if (_activeHoldKey == controlKey) ReleaseHold(controlKey, text + Loc.T(" (focus lost)", " (فقدان التركيز)")); };
             return btn;
         }
 
-        void StartHold(string controlKey, string label)
+        bool GetToggleState(string controlKey)
         {
-            if (_activeHoldKey != null && _activeHoldKey != controlKey)
-                ReleaseHold(_activeHoldKey, Loc.T("Switching output", "تبديل مخرج"));
-
-            _activeHoldKey = controlKey;
-            _holdStartedAt = DateTime.Now;
-            _lblStatus.Text = Loc.T("🟡 Holding active: ", "🟡 تشغيل لحظي نشط: ") + label + " (" + controlKey + " = 1)";
-            _lblStatus.ForeColor = Theme.Amber;
-
-            ThreadPool.QueueUserWorkItem(delegate
-            {
-                ParkState.Instance.SendManualControl(controlKey, true);
-            });
+            bool val;
+            return _toggleStates.TryGetValue(controlKey, out val) && val;
         }
 
-        void ReleaseHold(string controlKey, string label)
+        bool HasAnyActiveToggle()
         {
-            if (_activeHoldKey != controlKey && controlKey != null) return;
-            _activeHoldKey = null;
-            _lblStatus.Text = Loc.T("🟢 Safely released (ResetBit = 0): ", "🟢 تم الإيقاف الآمن (ResetBit = 0): ") + label;
-            _lblStatus.ForeColor = Theme.Ok;
+            foreach (var kv in _toggleStates)
+                if (kv.Value) return true;
+            return false;
+        }
+
+        void UpdateToggleVisual(string controlKey, bool active)
+        {
+            _toggleStates[controlKey] = active;
+            ToggleBtnInfo info;
+            if (!_toggleButtons.TryGetValue(controlKey, out info)) return;
+
+            if (active)
+            {
+                info.Button.BaseColor = Theme.Ok;
+                info.Button.HoverColor = Color.FromArgb(21, 128, 61);
+                info.Button.BorderColor = Color.FromArgb(187, 247, 208);
+                info.Button.Text = "● " + info.BaseText + " [ON]";
+            }
+            else
+            {
+                info.Button.BaseColor = info.OffColor;
+                info.Button.HoverColor = ControlPaint.Dark(info.OffColor, 0.08f);
+                info.Button.BorderColor = Color.Empty;
+                info.Button.Text = info.BaseText;
+            }
+            info.Button.Invalidate();
+        }
+
+        void ClearAllToggleVisuals()
+        {
+            var keys = new List<string>(_toggleButtons.Keys);
+            for (int i = 0; i < keys.Count; i++)
+                UpdateToggleVisual(keys[i], false);
+        }
+
+        void ToggleControl(string controlKey, string label, bool active)
+        {
+            // Keep UI synchronized with backend hydraulic UP/DOWN + Cutoff interlocks
+            if (active && string.Equals(controlKey, "man_up_tag", StringComparison.OrdinalIgnoreCase))
+            {
+                UpdateToggleVisual("man_down_tag", false);
+                UpdateToggleVisual("man_cutoff_tag", false);
+            }
+            else if (active && string.Equals(controlKey, "man_down_tag", StringComparison.OrdinalIgnoreCase))
+            {
+                UpdateToggleVisual("man_up_tag", false);
+                UpdateToggleVisual("man_pump_tag", false);
+                UpdateToggleVisual("man_cutoff_tag", false);
+            }
+
+            UpdateToggleVisual(controlKey, active);
+
+            if (active)
+            {
+                _lblStatus.Text = Loc.T("🟢 Toggled ON (SetBit = 1): ", "🟢 تم التشغيل (Toggle ON = 1): ") + label + " (" + controlKey + ")";
+                _lblStatus.ForeColor = Theme.Ok;
+            }
+            else
+            {
+                _lblStatus.Text = Loc.T("⚪ Toggled OFF (ResetBit = 0): ", "⚪ تم الإيقاف (Toggle OFF = 0): ") + label + " (" + controlKey + ")";
+                _lblStatus.ForeColor = Theme.Ink;
+            }
 
             string keyCopy = controlKey;
             string lblCopy = label;
-            ParkState.Instance.RecordLocalAudit("MANUAL_HOLD", keyCopy, lblCopy, Loc.UserDisplay(_shell.CurrentUser));
+            bool stateCopy = active;
+            ParkState.Instance.RecordLocalAudit(stateCopy ? "MANUAL_TOGGLE_ON" : "MANUAL_TOGGLE_OFF", keyCopy, lblCopy, Loc.UserDisplay(_shell.CurrentUser));
             ThreadPool.QueueUserWorkItem(delegate
             {
-                ParkState.Instance.SendManualControl(keyCopy, false);
+                ParkState.Instance.SendManualControl(keyCopy, stateCopy);
             });
         }
 
         void ReleaseAllOutputs(string reason)
         {
-            _activeHoldKey = null;
+            bool allowWallWasOn = GetToggleState("allow_wall_tag");
+            ClearAllToggleVisuals();
             _lblStatus.Text = "🛑 " + reason;
             _lblStatus.ForeColor = Theme.Err;
             ParkState.Instance.RecordLocalAudit("MANUAL_STOP_ALL", "ALL_OUTPUTS", reason, Loc.UserDisplay(_shell.CurrentUser));
             ThreadPool.QueueUserWorkItem(delegate
             {
-                // Atomic single-command release: clears all 13 manual actuator bits + manual_action_tag (%M0.3)
+                // Atomic single-command release: clears all manual actuator bits + manual_action_tag (%M0.3)
                 ParkState.Instance.SendManualControl("stop_all_manual", false);
+                if (allowWallWasOn)
+                    ParkState.Instance.SendManualControl("allow_wall_tag", false);
             });
         }
 
@@ -801,15 +849,15 @@ namespace AutoPark
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            if (!enableManual && _activeHoldKey != null)
-                ReleaseHold(_activeHoldKey, Loc.T("Returning to Auto Mode", "العودة للوضع التلقائي"));
+            if (!enableManual && HasAnyActiveToggle())
+                ReleaseAllOutputs(Loc.T("Returning to Auto Mode — all manual outputs turned OFF", "العودة للوضع التلقائي — تم فصل جميع المخارج اليدوية"));
 
             _manualEnabled = enableManual;
             _controlsContainer.Enabled = enableManual;
             ParkState.Instance.Sensors.ManualMode = enableManual;
             ParkState.Instance.Sensors.AutoMode = !enableManual;
             _lblStatus.Text = enableManual
-                ? Loc.T("🟠 Manual Mode Active — Operate controls with caution.", "🟠 الوضع اليدوي مفعّل (Manual Mode Active) — استخدم الأزرار بحذر.")
+                ? Loc.T("🟠 Manual Mode Active — Click any button to toggle ON/OFF.", "🟠 الوضع اليدوي مفعّل (Manual Mode Active) — اضغط على أي زر للتشغيل أو الإيقاف.")
                 : Loc.T("🟢 Auto Mode Active — Manual controls locked.", "🟢 الوضع التلقائي مفعّل (Auto Mode Active) — تم قفل أزرار التحكم اليدوي.");
             _lblStatus.ForeColor = enableManual ? Theme.Amber : Theme.Ok;
 

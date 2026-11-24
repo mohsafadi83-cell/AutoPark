@@ -98,7 +98,7 @@ namespace AutoPark
 
             var btnManual = MakeActionBtn(Loc.T("Manual", "الصيانة اليدوية"), Icons.Lock, Theme.Surface, Theme.SurfaceHover, 108, true);
             btnManual.Enabled = shell.CurrentUser.CanMaintenance && !isRestrictedEmployee;
-            btnManual.Click += delegate { shell.Navigate(new ManualMaintenancePage(shell), Loc.T("Safe Manual & Maintenance Mode (Hold-to-Run)", "وضع الصيانة والتحكم اليدوي الآمن (Hold-to-Run)")); };
+            btnManual.Click += delegate { shell.Navigate(new ManualMaintenancePage(shell), Loc.T("Manual & Maintenance Mode (Toggle)", "وضع الصيانة والتحكم اليدوي (Toggle)")); };
 
             var btnVehicles = MakeActionBtn(Loc.T("Vehicles", "المركبات"), Icons.Car, Theme.Surface, Theme.SurfaceHover, 96, true);
             btnVehicles.Enabled = !isRestrictedEmployee;
@@ -614,6 +614,7 @@ namespace AutoPark
         int _stepIndex = 0;
         int _waitTicks = 0;
         bool _cancelled = false;
+        volatile bool _backendDispatched = false;
         SpaceItem _chosenSpace;
         string _chosenPlate;
         CommandRecord _activeCmd;
@@ -888,8 +889,8 @@ namespace AutoPark
 
             int startFloor = (lane >= 1 && lane <= 4 && sens.CurrentFloor[lane - 1] >= 1) ? sens.CurrentFloor[lane - 1] : 1;
             string floorName = targetUiFloor == 3
-                ? Loc.T("P3 (Top — PLC Level 1)", "P3 (العلوي — PLC Level 1)")
-                : (targetUiFloor == 2 ? Loc.T("P2 (Mid — PLC Level 2)", "P2 (الأوسط — PLC Level 2)") : Loc.T("P1 (Bottom — PLC Level 3)", "P1 (السفلي — PLC Level 3)"));
+                ? Loc.T("P3 (Top — PLC Level 3)", "P3 (العلوي — PLC Level 3)")
+                : (targetUiFloor == 2 ? Loc.T("P2 (Mid — PLC Level 2)", "P2 (الأوسط — PLC Level 2)") : Loc.T("P1 (Bottom — PLC Level 1)", "P1 (السفلي — PLC Level 1)"));
 
             var confirm = Loc.ShowMsg(
                 "Confirm Industrial PLC Operation (2-Step Sequence):\n\n" +
@@ -986,9 +987,11 @@ namespace AutoPark
 
             string opCopy = _opType, plateCopy = _chosenPlate, targetSpaceCopy = _chosenSpace.SpaceNumber;
             bool isOtherCopy = (_opType == "PARK") && _radOtherCar.Checked;
+            _backendDispatched = false;
             System.Threading.ThreadPool.QueueUserWorkItem(delegate
             {
-                ParkState.Instance.PushOperationToBackend(opCopy, plateCopy, isOtherCopy, targetSpaceCopy);
+                bool dispatched = ParkState.Instance.PushOperationToBackend(opCopy, plateCopy, isOtherCopy, targetSpaceCopy);
+                _backendDispatched = dispatched;
             });
             st.NotifyChanged();
 
@@ -1058,16 +1061,23 @@ namespace AutoPark
                 if (stepCode == -1)
                 {
                     _activeCmd.Status = "ACKNOWLEDGED";
-                    string spotCode = _chosenSpace != null ? _chosenSpace.SpaceNumber : "";
-                    string op = _opType;
-                    var appSet = _shell.Settings;
-                    System.Threading.ThreadPool.QueueUserWorkItem(delegate { ExecutePlcStep1Handshake(appSet, op, spotCode); });
+                    // Avoid duplicate conflicting PLC writes when the backend /parking/request|retrieve endpoint already owns the 2-step S7 handshake
+                    if (!_backendDispatched && !st.BackendConnected)
+                    {
+                        string spotCode = _chosenSpace != null ? _chosenSpace.SpaceNumber : "";
+                        string op = _opType;
+                        var appSet = _shell.Settings;
+                        System.Threading.ThreadPool.QueueUserWorkItem(delegate { ExecutePlcStep1Handshake(appSet, op, spotCode); });
+                    }
                 }
                 else if (stepCode == -2)
                 {
                     _activeCmd.Status = "EXECUTING";
-                    var appSet = _shell.Settings;
-                    System.Threading.ThreadPool.QueueUserWorkItem(delegate { ExecutePlcStep2Handshake(appSet); });
+                    if (!_backendDispatched && !st.BackendConnected)
+                    {
+                        var appSet = _shell.Settings;
+                        System.Threading.ThreadPool.QueueUserWorkItem(delegate { ExecutePlcStep2Handshake(appSet); });
+                    }
                 }
 
                 _stepIndex++;
@@ -1533,12 +1543,30 @@ namespace AutoPark
                 sb.AppendLine("CommandID,RequestNumber,Type,PlateNumber,SpaceNumber,Status,RequestedBy,CreatedAt,CompletedAt");
                 foreach (var c in ParkState.Instance.Commands)
                 {
-                    sb.AppendLine(string.Format("\"{0}\",\"{1}\",\"{2}\",\"{3}\",\"{4}\",\"{5}\",\"{6}\",\"{7}\",\"{8}\"",
-                        c.CommandId, c.RequestNumber, c.Type, c.PlateNumber, c.SpaceNumber, c.Status, c.RequestedBy, c.CreatedAt, c.CompletedAt));
+                    sb.AppendLine(string.Join(",", new string[]
+                    {
+                        EscapeCsvField(c.CommandId),
+                        EscapeCsvField(c.RequestNumber),
+                        EscapeCsvField(c.Type),
+                        EscapeCsvField(c.PlateNumber),
+                        EscapeCsvField(c.SpaceNumber),
+                        EscapeCsvField(c.Status),
+                        EscapeCsvField(c.RequestedBy),
+                        EscapeCsvField(c.CreatedAt),
+                        EscapeCsvField(c.CompletedAt)
+                    }));
                 }
                 File.WriteAllText(sfd.FileName, sb.ToString(), new UTF8Encoding(true));
                 Loc.ShowMsg("Log exported successfully to:\n" + sfd.FileName, "تم تصدير السجل بنجاح إلى:\n" + sfd.FileName, "Export", "تصدير", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
+        }
+
+        static string EscapeCsvField(string raw)
+        {
+            string s = raw ?? "";
+            if (s.Length > 0 && (s[0] == '=' || s[0] == '+' || s[0] == '-' || s[0] == '@' || s[0] == '\t' || s[0] == '\r'))
+                s = "'" + s;
+            return "\"" + s.Replace("\"", "\"\"") + "\"";
         }
     }
 

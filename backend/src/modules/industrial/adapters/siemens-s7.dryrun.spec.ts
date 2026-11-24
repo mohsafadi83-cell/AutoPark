@@ -229,14 +229,40 @@ describe('SiemensS7Adapter — Safe Dry-Run Simulation (ZERO Physical Movement)'
     }
   });
 
-  test('stop_all_manual safely releases all 14 manual actuators and manual_action (%M0.3)', async () => {
+  test('stop_all_manual safely releases all 14 manual toggle controls and manual_action (%M0.3)', async () => {
     adapter.clearDryRunWrites();
     await adapter.manualControl('stop_all_manual', false);
     const writes = adapter.getDryRunWrites();
-    expect(writes.length).toBe(14);
+    expect(writes.length).toBe(15);
     expect(writes.every((w) => w.value === false)).toBe(true);
     expect(writes.some((w) => w.address === 'M0.3')).toBe(true);
     expect(writes.some((w) => w.address === 'DB1,X1.1')).toBe(true);
+    expect(writes.some((w) => w.address === 'M200.0')).toBe(true);
+  });
+
+  test('Toggle mode keeps manual_action (%M0.3) HIGH while any toggled lane/stopper remains ON', async () => {
+    await adapter.manualControl('stop_all_manual', false);
+    adapter.clearDryRunWrites();
+
+    // Toggle L1 ON and S1 ON simultaneously
+    await adapter.manualControl('man_l1_tag', true);
+    await adapter.manualControl('man_s1_tag', true);
+
+    // Toggle S1 OFF while L1 is still ON -> manual_action (%M0.3) must stay TRUE
+    adapter.clearDryRunWrites();
+    await adapter.manualControl('man_s1_tag', false);
+    expect(adapter.getDryRunWrites().map((w) => `${w.address}=${w.value}`)).toEqual([
+      'DB1,X2.2=false',
+      'M0.3=true',
+    ]);
+
+    // Toggle L1 OFF (last active) -> manual_action (%M0.3) now drops to FALSE
+    adapter.clearDryRunWrites();
+    await adapter.manualControl('man_l1_tag', false);
+    expect(adapter.getDryRunWrites().map((w) => `${w.address}=${w.value}`)).toEqual([
+      'DB1,X1.6=false',
+      'M0.3=false',
+    ]);
   });
 
   test('Safety Interlocks: E-Stop, Obstacle, and Invalid Lift Position block commands; physical Q writes rejected', async () => {
