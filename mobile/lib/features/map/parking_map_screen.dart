@@ -368,10 +368,11 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
           final isOccupied = space.status == SpaceStatus.occupied;
 
           Future<void> dispatchMove({required bool isPark}) async {
+            final messenger = ScaffoldMessenger.of(context);
             final manualPlate = plateCtrl.text.trim().toUpperCase();
             final useManual = manualPlate.isNotEmpty;
             if (isPark && !useManual && (selectedVehicleId == null || selectedVehicleId!.isEmpty)) {
-              ScaffoldMessenger.of(context).showSnackBar(
+              messenger.showSnackBar(
                 SnackBar(
                   content: Text(
                     isAr
@@ -399,7 +400,7 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
               await ref.read(appControllerProvider.notifier).refreshAllData();
               if (ctx.mounted) Navigator.of(ctx).pop();
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger.showSnackBar(
                   SnackBar(
                     backgroundColor: const Color(0xFF16A34A),
                     content: Text(
@@ -417,7 +418,7 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
             } on ApiError catch (e) {
               setSheetState(() => submitting = false);
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger.showSnackBar(
                   SnackBar(
                     backgroundColor: AppColors.statusError,
                     content: Text(e.localizedMessage(l10n)),
@@ -427,7 +428,7 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
             } catch (e) {
               setSheetState(() => submitting = false);
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger.showSnackBar(
                   SnackBar(
                     backgroundColor: AppColors.statusError,
                     content: Text(e.toString()),
