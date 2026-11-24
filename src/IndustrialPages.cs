@@ -162,11 +162,12 @@ namespace AutoPark
             _lblLiftPos = MakeSafetyBadge(safetyGrid, 3, 1, Loc.T("Lift Position (M50.3 / M50.5)", "تموضع المصعد (M50.3/5)"));
 
             // Live Physical Digital Inputs Strip (I0.0 – I3.7 = all 32 hardware sensor inputs directly from PLC IB0..IB3)
-            var rawIoCard = new Card { Dock = DockStyle.Top, Height = 104, Padding = new Padding(14, 8, 14, 8), Margin = new Padding(0, 0, 0, 8) };
+            var rawIoCard = new Card { Dock = DockStyle.Top, Height = 150, Padding = new Padding(14, 8, 14, 8), Margin = new Padding(0, 0, 0, 8) };
             _lblRawIoLine = Theme.Label(
                 Loc.T("Live Physical PLC Digital Inputs (I0.0–I3.7) — IB0=— IB1=— IB2=— IB3=—",
                       "مداخل الحساسات الفيزيائية الحية من الـ PLC (I0.0–I3.7) — IB0=— IB1=— IB2=— IB3=—"),
                 Theme.Bold(9.2f), Theme.Primary);
+            _lblRawIoLine.UseMnemonic = false;
             _lblRawIoLine.Dock = DockStyle.Top;
             _lblRawIoLine.Height = 20;
 
@@ -176,16 +177,18 @@ namespace AutoPark
             rawGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
             for (int i = 0; i < 32; i++)
             {
+                string nm = InputName(i);
                 var led = new Label
                 {
-                    Text = "I" + (i / 8) + "." + (i % 8),
-                    Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                    Text = "I" + (i / 8) + "." + (i % 8) + "\n" + nm,
+                    Font = new Font("Segoe UI", 7f, FontStyle.Bold),
                     TextAlign = ContentAlignment.MiddleCenter,
                     Dock = DockStyle.Fill,
                     Margin = new Padding(1),
                     BackColor = Theme.Back,
                     ForeColor = Theme.Muted,
-                    BorderStyle = BorderStyle.FixedSingle
+                    BorderStyle = BorderStyle.FixedSingle,
+                    UseMnemonic = false
                 };
                 _rawInLeds[i] = led;
                 rawGrid.Controls.Add(led, i % 16, i / 16);
@@ -262,6 +265,39 @@ namespace AutoPark
             Disposed += delegate { _refreshTimer.Stop(); };
             RenderSensors();
             PollAndRender(true);
+        }
+
+        /// <summary>Verified TIA Portal "PLC tags → Inputs [24]" names for I0.0..I3.7 (bit index = byte*8+bit).</summary>
+        static string InputName(int idx)
+        {
+            switch (idx)
+            {
+                case 0: return "MAIN_PF";
+                case 1: return "PCELL_IN";
+                case 2: return "OUT_PCELL";
+                case 3: return "PUMP_OL";
+                case 4: return "COMP_OL";
+                case 5: return "SPARE2";
+                case 6: return "SPARE3";
+                case 7: return "EMERGENCY";
+                case 16: return "PL1_MG";
+                case 17: return "PL2_MG";
+                case 18: return "PL3_MG";
+                case 19: return "PL4_MG";
+                case 20: return "PL1_BTM";
+                case 21: return "PL2_BTM";
+                case 22: return "PL3_BTM";
+                case 23: return "PL4_BTM";
+                case 24: return "PL1_TOP";
+                case 25: return "PL2_TOP";
+                case 26: return "PL3_TOP";
+                case 27: return "PL4_TOP";
+                case 28: return "PL1_MID";
+                case 29: return "PL2_MID";
+                case 30: return "PL3_MID";
+                case 31: return "PL4_MID";
+                default: return "(unused)";
+            }
         }
 
         Label MakeSafetyBadge(TableLayoutPanel parent, int col, int row, string titleText)
@@ -427,10 +463,11 @@ namespace AutoPark
                 }
                 else
                 {
+                    // MG_PROT polarity is not documented; show the raw %I state neutrally (no assumed safe/tripped meaning)
                     bool mg = s.MgProt[lane];
-                    _mgCells[lane].Text = mg ? Loc.T("🟢 Safe (OK)", "🟢 آمن (OK)") : Loc.T("🔴 Tripped", "🔴 مقفل / خلل");
-                    _mgCells[lane].BackColor = mg ? Theme.OkSoft : Theme.ErrSoft;
-                    _mgCells[lane].ForeColor = mg ? Theme.Ok : Theme.Err;
+                    _mgCells[lane].Text = mg ? Loc.T("🟢 Input ON (1)", "🟢 المدخل ON (1)") : Loc.T("⚪ Input OFF (0)", "⚪ المدخل OFF (0)");
+                    _mgCells[lane].BackColor = mg ? Theme.OkSoft : Theme.Back;
+                    _mgCells[lane].ForeColor = mg ? Theme.Ok : Theme.Muted;
                 }
 
                 bool loc = s.CheckLocation[lane];

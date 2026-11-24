@@ -264,6 +264,39 @@ describe('SiemensS7Adapter — Safe Dry-Run Simulation (ZERO Physical Movement)'
     ).rejects.toThrow(/valid position/i);
   });
 
+  test('Verified %I sensor table: limit switches, MG_PROT and raw inputs map to correct lanes', () => {
+    // Mirrors the TIA Portal "Inputs [24]" monitor snapshot: I2.5=PL2_LS_BTM, I3.2=PL3_LS_TOP, I3.7=PL4_LS_MID
+    adapter.setDryRunSensorValues({
+      ls_L1_btm: false, ls_L1_mid: false, ls_L1_top: false,
+      ls_L2_btm: true, ls_L2_mid: false, ls_L2_top: false,
+      ls_L3_btm: false, ls_L3_mid: false, ls_L3_top: true,
+      ls_L4_btm: false, ls_L4_mid: true, ls_L4_top: false,
+      mg_prot_L1: false, mg_prot_L2: false, mg_prot_L3: false, mg_prot_L4: false,
+    });
+    const snap = adapter.getSensorsSnapshot();
+    expect(snap.lanes[0]).toMatchObject({ lane: 1, lsBtm: false, lsMid: false, lsTop: false, lsMapped: true, currentFloor: 0 });
+    expect(snap.lanes[1]).toMatchObject({ lane: 2, lsBtm: true, lsMapped: true, currentFloor: 1 });
+    expect(snap.lanes[2]).toMatchObject({ lane: 3, lsTop: true, currentFloor: 3 });
+    expect(snap.lanes[3]).toMatchObject({ lane: 4, lsMid: true, currentFloor: 2 });
+    expect(snap.lanes.every((l) => l.mgProtMapped === true && l.mgProt === false)).toBe(true);
+  });
+
+  test('Default verified tag map assigns every %I address from the TIA Portal Inputs table', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { DEFAULT_VERIFIED_S7_TAG_MAP: m } = require('../integration-settings');
+    const expected: Record<string, string> = {
+      main_pf_in_tag: 'I0.0', pcell_in_1_tag: 'I0.1', out_photocell_tag: 'I0.2', pump_ol_in_tag: 'I0.3',
+      comp_ol_in_tag: 'I0.4', emergency_in_tag: 'I0.7',
+      mg_prot_L1: 'I2.0', mg_prot_L2: 'I2.1', mg_prot_L3: 'I2.2', mg_prot_L4: 'I2.3',
+      ls_L1_btm: 'I2.4', ls_L2_btm: 'I2.5', ls_L3_btm: 'I2.6', ls_L4_btm: 'I2.7',
+      ls_L1_top: 'I3.0', ls_L2_top: 'I3.1', ls_L3_top: 'I3.2', ls_L4_top: 'I3.3',
+      ls_L1_mid: 'I3.4', ls_L2_mid: 'I3.5', ls_L3_mid: 'I3.6', ls_L4_mid: 'I3.7',
+    };
+    for (const [k, addr] of Object.entries(expected)) {
+      expect(m[k]?.address).toBe(addr);
+    }
+  });
+
   test('Motor/Compressor Overload & Alarm decoding + SAFE_RESET never force-zeros DB2,W8', async () => {
     adapter.setDryRunSensorValues({
       pump_overload_tag: true,

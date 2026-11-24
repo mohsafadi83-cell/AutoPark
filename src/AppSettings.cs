@@ -127,6 +127,12 @@ namespace AutoPark
                 case "emergency_status_tag": return "M50.0";
                 case "emergency_during_move_tag": return "M7.0";
                 case "safety_ok_tag": return "DB1,X0.7";
+                case "pcell_in_1_tag": return "I0.1";
+                case "main_pf_in_tag": return "I0.0";
+                case "out_photocell_tag": return "I0.2";
+                case "pump_ol_in_tag": return "I0.3";
+                case "comp_ol_in_tag": return "I0.4";
+                case "emergency_in_tag": return "I0.7";
                 case "pcell_inside_db_tag": return "DB1,X0.7";
                 case "pcell_outside_db_tag": return "DB1,X1.0";
                 case "fault_db_tag": return "DB1,X0.0";
@@ -202,12 +208,18 @@ namespace AutoPark
                 return "ParkDB." + key.Substring(5, 3);
             if (key.StartsWith("ls_L") && key.Length >= 9)
             {
-                string laneNum = key.Substring(4, 1);
-                string pos = key.Substring(6).ToUpperInvariant();
-                return "PL" + laneNum + "_LS_" + pos;
+                // Verified TIA Portal %I table: BTM=I2.4..I2.7, TOP=I3.0..I3.3, MID=I3.4..I3.7 (Lane 1..4)
+                int ln;
+                if (int.TryParse(key.Substring(4, 1), out ln) && ln >= 1 && ln <= 4)
+                {
+                    string pos = key.Substring(6).ToLowerInvariant();
+                    if (pos == "btm") return "I2." + (3 + ln);
+                    if (pos == "top") return "I3." + (ln - 1);
+                    if (pos == "mid") return "I3." + (3 + ln);
+                }
             }
             if (key.StartsWith("mg_prot_L") && key.Length == 10)
-                return "PL" + key.Substring(9, 1) + "_MG_PROT";
+                return "I2." + (int.Parse(key.Substring(9, 1)) - 1);
             if (key.StartsWith("check_loc_L") && key.Length == 12)
                 return "Lane" + key.Substring(11, 1) + "_check_location";
             return "ParkDB." + key.ToUpperInvariant();
