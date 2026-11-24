@@ -93,10 +93,7 @@ namespace AutoPark
             btnVnc.ForeColor = Theme.Blue;
             btnVnc.Click += delegate { shell.Navigate(new VncViewerPage(shell), Loc.T("Standalone Direct HMI Console (No VNC Required)", "شاشة الماكنة المباشرة — تشغيل مستقل بدون VNC")); };
 
-            var btnSensors = MakeActionBtn(Loc.T("Sensors", "مراقبة الحساسات"), Icons.Plug, Theme.Surface, Theme.SurfaceHover, 104, true);
-            btnSensors.Click += delegate { shell.Navigate(new SensorMonitorPage(shell), Loc.T("Live Sensor & Limit-Switch Monitor", "مراقبة الحساسات ومفاتيح النهاية الحية (Status Monitor)")); };
-
-            var btnManual = MakeActionBtn(Loc.T("Manual", "الصيانة اليدوية"), Icons.Lock, Theme.Surface, Theme.SurfaceHover, 108, true);
+            var btnManual = MakeActionBtn(Loc.T("Manual & Sensors", "اليدوي والحساسات"), Icons.Lock, Theme.Surface, Theme.SurfaceHover, 142, true);
             btnManual.Enabled = shell.CurrentUser.CanMaintenance && !isRestrictedEmployee;
             btnManual.Click += delegate { shell.Navigate(new ManualMaintenancePage(shell), Loc.T("Manual Controls & Live Sensors", "التحكم اليدوي والحساسات الحية")); };
 
@@ -133,10 +130,9 @@ namespace AutoPark
             addNav(btnSystemCheck, 122);
             addNav(btnClassicSim, 132);
             addNav(btnVnc, 108);
-            addNav(btnSensors, 104);
             if (!isRestrictedEmployee)
             {
-                addNav(btnManual, 108);
+                addNav(btnManual, 142);
                 addNav(btnVehicles, 96);
                 addNav(btnAlarms, 94);
                 addNav(btnHistory, 96);
