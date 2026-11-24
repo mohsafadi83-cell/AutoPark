@@ -582,7 +582,7 @@ namespace AutoPark
         // [laneIndex 0..3, levelIndex 0=BTM(P1), 1=MID(P2), 2=TOP(P3)]
         public bool[,] LimitSwitches = new bool[4, 3];
         public bool[] LsMapped = new bool[4];
-        public bool[] MgProt = new bool[] { true, true, true, true };
+        public bool[] MgProt = new bool[] { false, false, false, false };
         public bool[] MgProtMapped = new bool[4];
         public bool[] CheckLocation = new bool[] { false, false, false, false };
         public int[] CurrentFloor = new int[] { 0, 0, 0, 0 }; // 1=P1(BTM), 2=P2(MID), 3=P3(TOP), 0=Unmapped/Between

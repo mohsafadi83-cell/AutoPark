@@ -420,7 +420,8 @@ namespace AutoPark
 
                 int curF = sensors.CurrentFloor[lane - 1];
                 string floorBadge = curF == 3 ? "P3 (TOP)" : (curF == 2 ? "P2 (MID)" : (curF == 1 ? "P1 (BTM)" : Loc.T("Moving", "متحرك")));
-                string mgIcon = sensors.MgProt[lane - 1] ? "🟢" : "🔴";
+                bool mgTripped = sensors.MgProtMapped[lane - 1] && sensors.MgProt[lane - 1];
+                string mgIcon = mgTripped ? "🔴" : "🟢";
                 var towerHeader = Theme.Label(
                     Loc.T("Lane " + lane + "  |  Lift: " + floorBadge + " " + mgIcon,
                           "المسار " + lane + " (Lane " + lane + ")  |  المصعد: " + floorBadge + " " + mgIcon),
@@ -881,7 +882,7 @@ namespace AutoPark
             int targetUiFloor = _chosenSpace.PositionInColumn;
             int plcLevel = AppSettings.MapUiFloorToPlcLevel(targetUiFloor);
 
-            if (lane >= 1 && lane <= 4 && !sens.MgProt[lane - 1])
+            if (lane >= 1 && lane <= 4 && sens.MgProtMapped[lane - 1] && sens.MgProt[lane - 1])
             {
                 Loc.ShowMsg("⛔ Mechanical protection (PL" + lane + "_MG_PROT) on Lane " + lane + " is tripped!", "⛔ الحماية الميكانيكية (PL" + lane + "_MG_PROT) للمسار " + lane + " غير آمنة! يمنع التحريك.", "Mechanical Protection", "حماية ميكانيكية", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
