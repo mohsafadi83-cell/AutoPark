@@ -4,12 +4,76 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Serialization;
 
 namespace AutoPark
 {
+    public static class PasswordSecurity
+    {
+        public const string Prefix = "PBKDF2$";
+        const int DefaultIterations = 100000;
+        const int SaltBytes = 16;
+        const int HashBytes = 32;
+
+        public static bool IsHashed(string stored)
+        {
+            return !string.IsNullOrEmpty(stored) && stored.StartsWith(Prefix, StringComparison.Ordinal);
+        }
+
+        public static string HashPassword(string plain)
+        {
+            if (plain == null) plain = "";
+            byte[] salt = new byte[SaltBytes];
+            using (var rng = new RNGCryptoServiceProvider())
+            {
+                rng.GetBytes(salt);
+            }
+            using (var pbkdf2 = new Rfc2898DeriveBytes(plain, salt, DefaultIterations))
+            {
+                byte[] hash = pbkdf2.GetBytes(HashBytes);
+                return Prefix + DefaultIterations + "$" + Convert.ToBase64String(salt) + "$" + Convert.ToBase64String(hash);
+            }
+        }
+
+        public static bool VerifyPassword(string plain, string stored)
+        {
+            if (string.IsNullOrEmpty(plain) || string.IsNullOrEmpty(stored)) return false;
+            if (!IsHashed(stored))
+            {
+                return ConstantTimeEquals(Encoding.UTF8.GetBytes(plain), Encoding.UTF8.GetBytes(stored));
+            }
+            try
+            {
+                string[] parts = stored.Split('$');
+                if (parts.Length != 4) return false;
+                int iter;
+                if (!int.TryParse(parts[1], out iter) || iter < 1000) return false;
+                byte[] salt = Convert.FromBase64String(parts[2]);
+                byte[] expected = Convert.FromBase64String(parts[3]);
+                using (var pbkdf2 = new Rfc2898DeriveBytes(plain, salt, iter))
+                {
+                    byte[] actual = pbkdf2.GetBytes(expected.Length);
+                    return ConstantTimeEquals(actual, expected);
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        static bool ConstantTimeEquals(byte[] a, byte[] b)
+        {
+            if (a == null || b == null || a.Length != b.Length) return false;
+            int diff = 0;
+            for (int i = 0; i < a.Length; i++) diff |= a[i] ^ b[i];
+            return diff == 0;
+        }
+    }
+
     public class UserAccount
     {
         public string Username;
@@ -320,12 +384,13 @@ namespace AutoPark
                 }
                 else if (section == "USERS")
                 {
-                    // format: username=password|FullName|Role|Phone
+                    // format: username=PBKDF2$...|FullName|Role|Phone
                     string[] parts = val.Split('|');
+                    string rawPwd = parts.Length > 0 ? parts[0].Trim() : "";
                     var ua = new UserAccount
                     {
                         Username = key,
-                        Password = parts.Length > 0 ? parts[0].Trim() : "1234",
+                        Password = rawPwd,
                         FullName = parts.Length > 1 ? parts[1].Trim() : key,
                         Role = parts.Length > 2 ? parts[2].Trim().ToUpperInvariant() : "OPERATOR",
                         Phone = parts.Length > 3 ? parts[3].Trim() : "+962795100000",
@@ -340,18 +405,33 @@ namespace AutoPark
                 AddDefaultUsers(s);
             }
 
+            // Auto-migrate any legacy plaintext passwords in settings.ini to salted PBKDF2 hashes
+            bool migrated = false;
+            foreach (var u in s.Users.Values)
+            {
+                if (!string.IsNullOrEmpty(u.Password) && !PasswordSecurity.IsHashed(u.Password))
+                {
+                    u.Password = PasswordSecurity.HashPassword(u.Password);
+                    migrated = true;
+                }
+            }
+            if (migrated)
+            {
+                try { s.Save(); } catch { }
+            }
+
             return s;
         }
 
         static void AddDefaultUsers(AppSettings s)
         {
-            s.Users["superadmin"] = new UserAccount { Username = "superadmin", Password = "Admin@12345", FullName = "Mohammad Al-Safadi", Role = "SUPER_ADMIN", Phone = "+962795100001", Email = "superadmin@autopark.jo" };
-            s.Users["admin"] = new UserAccount { Username = "admin", Password = "Admin@12345", FullName = "خالد الطراونة (مدير النظام)", Role = "SYSTEM_ADMIN", Phone = "+962795100002", Email = "admin@autopark.jo" };
-            s.Users["operator"] = new UserAccount { Username = "operator", Password = "Operator@123", FullName = "فهد العبادي (مشغّل النظام)", Role = "OPERATOR", Phone = "+962795100003", Email = "operator@autopark.jo" };
-            s.Users["attendant"] = new UserAccount { Username = "attendant", Password = "Operator@123", FullName = "سعد الزعبي (موظف مواقف)", Role = "PARKING_ATTENDANT", Phone = "+962785100004", Email = "attendant@autopark.jo" };
-            s.Users["engineer"] = new UserAccount { Username = "engineer", Password = "Engineer@123", FullName = "م. طارق المومني (مهندس صيانة)", Role = "MAINTENANCE_ENGINEER", Phone = "+962795100005", Email = "engineer@autopark.jo" };
-            s.Users["customer"] = new UserAccount { Username = "customer", Password = "Customer@123", FullName = "عميل مواقف (عميل)", Role = "CUSTOMER", Phone = "+962775100006", Email = "customer@autopark.jo" };
-            s.Users["viewer"] = new UserAccount { Username = "viewer", Password = "Viewer@1234", FullName = "ياسر الحياري (قراءة فقط)", Role = "READ_ONLY", Phone = "+962795100007", Email = "viewer@autopark.jo" };
+            s.Users["superadmin"] = new UserAccount { Username = "superadmin", Password = PasswordSecurity.HashPassword("Admin@12345"), FullName = "Mohammad Al-Safadi", Role = "SUPER_ADMIN", Phone = "+962795100001", Email = "superadmin@autopark.jo" };
+            s.Users["admin"] = new UserAccount { Username = "admin", Password = PasswordSecurity.HashPassword("Admin@12345"), FullName = "خالد الطراونة (مدير النظام)", Role = "SYSTEM_ADMIN", Phone = "+962795100002", Email = "admin@autopark.jo" };
+            s.Users["operator"] = new UserAccount { Username = "operator", Password = PasswordSecurity.HashPassword("Operator@123"), FullName = "فهد العبادي (مشغّل النظام)", Role = "OPERATOR", Phone = "+962795100003", Email = "operator@autopark.jo" };
+            s.Users["attendant"] = new UserAccount { Username = "attendant", Password = PasswordSecurity.HashPassword("Operator@123"), FullName = "سعد الزعبي (موظف مواقف)", Role = "PARKING_ATTENDANT", Phone = "+962785100004", Email = "attendant@autopark.jo" };
+            s.Users["engineer"] = new UserAccount { Username = "engineer", Password = PasswordSecurity.HashPassword("Engineer@123"), FullName = "م. طارق المومني (مهندس صيانة)", Role = "MAINTENANCE_ENGINEER", Phone = "+962795100005", Email = "engineer@autopark.jo" };
+            s.Users["customer"] = new UserAccount { Username = "customer", Password = PasswordSecurity.HashPassword("Customer@123"), FullName = "عميل مواقف (عميل)", Role = "CUSTOMER", Phone = "+962775100006", Email = "customer@autopark.jo" };
+            s.Users["viewer"] = new UserAccount { Username = "viewer", Password = PasswordSecurity.HashPassword("Viewer@1234"), FullName = "ياسر الحياري (قراءة فقط)", Role = "READ_ONLY", Phone = "+962795100007", Email = "viewer@autopark.jo" };
         }
 
         public void Save()

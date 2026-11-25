@@ -15,6 +15,8 @@ namespace AutoPark
         readonly TextBox _user;
         readonly TextBox _pass;
         readonly Label _error;
+        int _failedAttempts = 0;
+        DateTime _lockoutUntilUtc = DateTime.MinValue;
 
         public UserAccount AuthenticatedUser { get; private set; }
 
@@ -35,7 +37,7 @@ namespace AutoPark
             if (BrandAssets.AppIcon != null) Icon = BrandAssets.AppIcon;
             Text = Loc.T("Sign In — TECHNO Electrical.Jo | Auto Park", "تسجيل الدخول — TECHNO Electrical.Jo | أوتو بارك");
             FormBorderStyle = FormBorderStyle.None;
-            ClientSize = new Size(860, 520);
+            ClientSize = new Size(820, 420);
             BackColor = Theme.Border;
             Padding = new Padding(1);
             KeyPreview = true;
@@ -43,7 +45,7 @@ namespace AutoPark
             // ---- brand side (left) ----
             var brand = new Panel();
             brand.Dock = DockStyle.Left;
-            brand.Width = 370;
+            brand.Width = 340;
             brand.Paint += PaintBrand;
             brand.MouseDown += Drag;
 
@@ -64,7 +66,7 @@ namespace AutoPark
             side.BackColor = Theme.Surface;
             side.MouseDown += Drag;
 
-            const int x = 48, w = 390;
+            const int x = 44, w = 390;
 
             var btnLang = new ModernButton();
             btnLang.Text = Loc.ToggleButtonLabel;
@@ -85,59 +87,36 @@ namespace AutoPark
             };
 
             var title = Theme.Label(Loc.T("Control Center Sign In", "تسجيل الدخول إلى مركز التحكم"), Theme.Bold(18f), Theme.Ink);
-            title.SetBounds(x, 42, w, 40);
-            var sub = Theme.Label(Loc.T("Automated Smart Parking System (12 Bays — 4 Lanes × 3 Floors)", "منظومة المواقف الذكية المؤتمتة (12 مصف — 4 مسارات × 3 طوابق)"), Theme.F(9.5f), Theme.Muted);
-            sub.SetBounds(x, 82, w, 24);
+            title.SetBounds(x, 54, w, 40);
+            var sub = Theme.Label(Loc.T("Authorized Personnel Only", "الدخول للمصرح لهم فقط"), Theme.F(9.5f), Theme.Muted);
+            sub.SetBounds(x, 94, w, 24);
 
             var lu = Theme.Label(Loc.T("Username", "اسم المستخدم"), Theme.Semi(10f), Theme.Ink);
-            lu.SetBounds(x, 122, w, 24);
+            lu.SetBounds(x, 134, w, 24);
             _user = new TextBox();
             _user.BorderStyle = BorderStyle.None;
-            _user.Text = "superadmin";
             var userBox = new FieldBox(_user, Icons.User, 0);
-            userBox.SetBounds(x, 148, w, 42);
+            userBox.SetBounds(x, 160, w, 42);
 
             var lp = Theme.Label(Loc.T("Password", "كلمة المرور"), Theme.Semi(10f), Theme.Ink);
-            lp.SetBounds(x, 200, w, 24);
+            lp.SetBounds(x, 214, w, 24);
             _pass = new TextBox();
             _pass.BorderStyle = BorderStyle.None;
             _pass.UseSystemPasswordChar = true;
-            _pass.Text = "Admin@12345";
             var passBox = new FieldBox(_pass, Icons.Lock, 0);
-            passBox.SetBounds(x, 226, w, 42);
+            passBox.SetBounds(x, 240, w, 42);
 
-            _error = Theme.Label("", Theme.F(9.5f), Theme.Err);
-            _error.SetBounds(x, 274, w, 24);
+            _error = Theme.Label("", Theme.F(9.3f), Theme.Err);
+            _error.SetBounds(x, 290, w, 28);
 
             var login = new ModernButton();
             login.Text = Loc.T("Sign In", "تسجيل الدخول");
             login.Font = Theme.Bold(12f);
-            login.SetBounds(x, 302, w, 46);
+            login.SetBounds(x, 326, w, 46);
             login.Click += OnLogin;
             AcceptButton = login;
 
-            var quickLbl = Theme.Label(Loc.T("Registered Staff Accounts (Quick Fill):", "حسابات الموظفين المعرّفين (تعبئة سريعة):"), Theme.F(9f), Theme.Muted);
-            quickLbl.SetBounds(x, 362, w, 20);
-
-            var quickFlow = new FlowLayoutPanel();
-            quickFlow.SetBounds(x, 386, w, 82);
-            quickFlow.BackColor = Color.Transparent;
-            quickFlow.RightToLeft = Loc.Rtl;
-
-            AddQuickButton(quickFlow, Loc.T("Super Admin", "مدير أعلى (superadmin)"), "superadmin", "Admin@12345");
-            AddQuickButton(quickFlow, Loc.T("System Admin", "مدير النظام (admin)"), "admin", "Admin@12345");
-            AddQuickButton(quickFlow, Loc.T("Operator", "مشغّل (operator)"), "operator", "Operator@123");
-            AddQuickButton(quickFlow, Loc.T("Maintenance Eng.", "مهندس صيانة (engineer)"), "engineer", "Engineer@123");
-            AddQuickButton(quickFlow, Loc.T("Attendant", "موظف مواقف (attendant)"), "attendant", "Operator@123");
-            AddQuickButton(quickFlow, Loc.T("Read Only", "قراءة فقط (viewer)"), "viewer", "Viewer@1234");
-
-            var foot = Theme.Label(
-                Loc.T("PLC: ", "المتحكم: ") + settings.Protocol + " (" + settings.PlcIp + ":" + settings.PlcPort + ") | " +
-                Loc.T("Capacity: ", "السعة: ") + settings.TotalSpaces + Loc.T(" Bays", " مصف"),
-                Theme.F(8.8f), Theme.Muted);
-            foot.SetBounds(x, 480, w, 22);
-
-            side.Controls.AddRange(new Control[] { btnLang, title, sub, lu, userBox, lp, passBox, _error, login, quickLbl, quickFlow, foot });
+            side.Controls.AddRange(new Control[] { btnLang, title, sub, lu, userBox, lp, passBox, _error, login });
 
             Controls.Add(side);
             Controls.Add(brand);
@@ -147,28 +126,6 @@ namespace AutoPark
             {
                 if (e.KeyCode == Keys.Escape) { DialogResult = DialogResult.Cancel; Close(); }
             };
-        }
-
-        void AddQuickButton(FlowLayoutPanel parent, string label, string u, string p)
-        {
-            var btn = new ModernButton();
-            btn.Text = label;
-            btn.Font = Theme.F(8.3f);
-            btn.Size = new Size(122, 32);
-            btn.Radius = 6;
-            btn.BaseColor = Theme.Back;
-            btn.HoverColor = Theme.PrimarySoft;
-            btn.PressColor = Theme.PrimarySoft;
-            btn.BorderColor = Theme.Border;
-            btn.ForeColor = Theme.Ink;
-            btn.Margin = new Padding(0, 0, 6, 6);
-            btn.Click += delegate
-            {
-                _user.Text = u;
-                _pass.Text = p;
-                _error.Text = "";
-            };
-            parent.Controls.Add(btn);
         }
 
         void Drag(object sender, MouseEventArgs e)
@@ -193,7 +150,7 @@ namespace AutoPark
                 g.FillEllipse(b, r.Width - 120, -60, 200, 200);
             }
 
-            var logoBox = new Rectangle((r.Width - 132) / 2, 72, 132, 152);
+            var logoBox = new Rectangle((r.Width - 128) / 2, 62, 128, 146);
             using (var path = Theme.Round(logoBox, 16))
             using (var b = new SolidBrush(Color.White))
                 g.FillPath(b, path);
@@ -208,34 +165,51 @@ namespace AutoPark
             }
 
             var center = TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | (Loc.IsArabic ? TextFormatFlags.RightToLeft : TextFormatFlags.Default);
-            using (var f = Theme.Bold(19f))
-                TextRenderer.DrawText(g, BrandAssets.CompanyNameEn, f, new Rectangle(0, 240, r.Width, 38), Color.White, center);
-            using (var f = Theme.Semi(13.5f))
-                TextRenderer.DrawText(g, Loc.T("Auto Park — Smart Parking", "أوتو بارك — المواقف الذكية"), f, new Rectangle(0, 280, r.Width, 30), Color.FromArgb(225, 248, 250), center);
-            using (var f = Theme.F(10f))
-                TextRenderer.DrawText(g, Loc.T("Automated Parking Management & Control", "نظام الإدارة والتحكم بالمواقف الآلية"), f, new Rectangle(0, 314, r.Width, 26),
+            using (var f = Theme.Bold(18f))
+                TextRenderer.DrawText(g, BrandAssets.CompanyNameEn, f, new Rectangle(0, 228, r.Width, 38), Color.White, center);
+            using (var f = Theme.Semi(13f))
+                TextRenderer.DrawText(g, Loc.T("Auto Park", "أوتو بارك"), f, new Rectangle(0, 268, r.Width, 30), Color.FromArgb(225, 248, 250), center);
+            using (var f = Theme.F(9.8f))
+                TextRenderer.DrawText(g, Loc.T("Secure Access Portal", "بوابة الدخول الآمن"), f, new Rectangle(0, 302, r.Width, 26),
                     Color.FromArgb(200, 236, 239), center);
-            using (var f = Theme.F(9.5f))
-                TextRenderer.DrawText(g, "Siemens SIMATIC S7-1200 PLC Ready", f, new Rectangle(0, 344, r.Width, 24),
-                    Color.FromArgb(175, 220, 225), center);
         }
 
         void OnLogin(object sender, EventArgs e)
         {
+            if (DateTime.UtcNow < _lockoutUntilUtc)
+            {
+                int rem = Math.Max(1, (int)Math.Ceiling((_lockoutUntilUtc - DateTime.UtcNow).TotalSeconds));
+                _error.Text = Loc.T("Too many failed attempts. Try again in " + rem + "s.", "محاولات دخول فاشلة متكررة. حاول مجدداً بعد " + rem + " ثانية.");
+                return;
+            }
+
             string user = _user.Text.Trim();
+            string pwd = _pass.Text;
             UserAccount acc;
 
-            if (user.Length > 0 && _settings.Users.TryGetValue(user, out acc) && acc.Password == _pass.Text)
+            if (user.Length > 0 && pwd.Length > 0 && _settings.Users.TryGetValue(user, out acc) && PasswordSecurity.VerifyPassword(pwd, acc.Password))
             {
-                ParkState.Instance.EnsureBackendRunningAndLogin(user, _pass.Text);
+                _failedAttempts = 0;
+                ParkState.Instance.EnsureBackendRunningAndLogin(user, pwd);
+                _pass.Text = "";
                 AuthenticatedUser = acc;
                 DialogResult = DialogResult.OK;
                 Close();
                 return;
             }
 
-            _error.Text = Loc.T("Invalid username or password", "اسم المستخدم أو كلمة المرور غير صحيحة");
-            _pass.SelectAll();
+            _failedAttempts++;
+            if (_failedAttempts >= 5)
+            {
+                _lockoutUntilUtc = DateTime.UtcNow.AddSeconds(60);
+                _failedAttempts = 0;
+                _error.Text = Loc.T("Account locked for 60s due to failed attempts.", "تم قفل الدخول لمدة 60 ثانية بسبب محاولات فاشلة متكررة.");
+            }
+            else
+            {
+                _error.Text = Loc.T("Invalid username or password", "اسم المستخدم أو كلمة المرور غير صحيحة");
+            }
+            _pass.Text = "";
             _pass.Focus();
         }
     }
