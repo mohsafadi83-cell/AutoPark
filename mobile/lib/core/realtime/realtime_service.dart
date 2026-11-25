@@ -16,6 +16,7 @@ class RealtimeService {
   final _vehicleMovingCtrl = StreamController<Map<String, dynamic>>.broadcast();
   final _heartbeatCtrl = StreamController<DateTime>.broadcast();
   final _connectedCtrl = StreamController<bool>.broadcast();
+  final _reconnectingCtrl = StreamController<bool>.broadcast();
 
   Stream<SystemStatus> get systemStatusStream => _systemStatusCtrl.stream;
   Stream<ParkingRequest> get requestStream => _requestCtrl.stream;
@@ -26,6 +27,7 @@ class RealtimeService {
       _vehicleMovingCtrl.stream;
   Stream<DateTime> get heartbeatStream => _heartbeatCtrl.stream;
   Stream<bool> get connectedStream => _connectedCtrl.stream;
+  Stream<bool> get reconnectingStream => _reconnectingCtrl.stream;
 
   bool _isConnected = false;
   bool get isConnected => _isConnected;
@@ -51,11 +53,31 @@ class RealtimeService {
     socket.onConnect((_) {
       _isConnected = true;
       _connectedCtrl.add(true);
+      _reconnectingCtrl.add(false);
     });
 
     socket.onDisconnect((_) {
       _isConnected = false;
       _connectedCtrl.add(false);
+      _reconnectingCtrl.add(true);
+    });
+
+    socket.onReconnectAttempt((_) {
+      _isConnected = false;
+      _connectedCtrl.add(false);
+      _reconnectingCtrl.add(true);
+    });
+
+    socket.onConnectError((_) {
+      _isConnected = false;
+      _connectedCtrl.add(false);
+      _reconnectingCtrl.add(true);
+    });
+
+    socket.onReconnectError((_) {
+      _isConnected = false;
+      _connectedCtrl.add(false);
+      _reconnectingCtrl.add(true);
     });
 
     socket.on('auth.error', (_) async {
@@ -158,5 +180,6 @@ class RealtimeService {
     _vehicleMovingCtrl.close();
     _heartbeatCtrl.close();
     _connectedCtrl.close();
+    _reconnectingCtrl.close();
   }
 }

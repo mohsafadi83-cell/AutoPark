@@ -66,6 +66,8 @@ class User {
 
   bool get canMonitorSystem => hasPermission(Permission.systemMonitor);
 
+  bool get canManualControl => hasPermission(Permission.diagnosticsView);
+
   bool get canManageConfig => hasPermission(Permission.configManage);
 
   bool get canControlSimulation => hasPermission(Permission.simulationControl);

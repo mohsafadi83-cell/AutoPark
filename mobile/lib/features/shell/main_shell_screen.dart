@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/connectivity/safety_connectivity_banner.dart';
@@ -7,7 +8,9 @@ import '../../core/providers/app_providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../alarms/alarms_screen.dart';
+import '../auth/server_url_dialog.dart';
 import '../dashboard/dashboard_screen.dart';
+import '../manual/manual_plc_control_screen.dart';
 import '../map/parking_map_screen.dart';
 import '../monitoring/monitoring_screen.dart';
 import '../notifications/notifications_screen.dart';
@@ -102,47 +105,9 @@ class _MainShellScreenState extends ConsumerState<MainShellScreen> {
       return;
     }
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
-          children: [
-            const Icon(Icons.emergency_rounded, color: AppColors.statusError, size: 28),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                isAr ? 'تأكيد إيقاف الطوارئ (E-STOP)' : 'Confirm Emergency Stop',
-                style: const TextStyle(color: AppColors.statusError, fontWeight: FontWeight.w800),
-              ),
-            ),
-          ],
-        ),
-        content: Text(
-          isAr
-              ? 'سيتم إيقاف جميع المصاعد والمحركات والعمليات فوراً وتسجيل اسمك ووقت التفعيل في سجل الأمان.\n\nهل تريد تفعيل إيقاف الطوارئ الآن؟'
-              : 'This will IMMEDIATELY halt all lifts, motors, and active operations and log your action in the safety audit.\n\nActivate Emergency Stop now?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text(isAr ? 'إلغاء' : 'Cancel'),
-          ),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.statusError,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            icon: const Icon(Icons.stop_circle_rounded),
-            label: Text(
-              isAr ? 'إيقاف الطوارئ الآن' : 'ACTIVATE E-STOP',
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
+    // Emergency Stop activation is IMMEDIATE (no blocking confirmation delay)
+    // with tactile haptic feedback and unmistakable visual confirmation.
+    HapticFeedback.heavyImpact();
     await _dispatchEStopAction('ESTOP_ON', isAr);
   }
 
@@ -199,9 +164,11 @@ class _MainShellScreenState extends ConsumerState<MainShellScreen> {
     final l10n = AppLocalizations.of(context);
     final appState = ref.watch(appControllerProvider);
     final canViewAlarms = appState.user?.canViewAlarms ?? false;
+    final canManualControl = appState.user?.canManualControl ?? false;
     final sys = appState.systemStatus ?? appState.dashboard?.system;
     final isEStopActive = sys?.emergencyStop ?? false;
     final isAr = appState.locale.languageCode == 'ar';
+    final connPhase = appState.connectionPhase;
 
     final pages = <Widget>[
       DashboardScreen(
@@ -210,7 +177,10 @@ class _MainShellScreenState extends ConsumerState<MainShellScreen> {
         onOpenNotifications: _openNotifications,
       ),
       const ParkingMapScreen(),
-      ParkingOperationsScreen(initialSubTab: _operationsSubTab),
+      if (canManualControl)
+        const ManualPlcControlScreen()
+      else
+        ParkingOperationsScreen(initialSubTab: _operationsSubTab),
       if (canViewAlarms) const AlarmsScreen(),
       const ProfileAndMoreScreen(),
     ];
@@ -375,6 +345,7 @@ class _MainShellScreenState extends ConsumerState<MainShellScreen> {
                 ),
               ),
             ),
+          _buildConnectionStatusBar(appState, connPhase, isAr),
           SafetyConnectivityBanner(
             networkOnline: appState.networkOnline,
             backendReachable: appState.backendReachable,
@@ -399,9 +370,19 @@ class _MainShellScreenState extends ConsumerState<MainShellScreen> {
             label: l10n.navMap,
           ),
           NavigationDestination(
-            icon: const Icon(Icons.swap_vert_circle_outlined),
-            selectedIcon: const Icon(Icons.swap_vert_circle_rounded),
-            label: l10n.navOperations,
+            icon: Icon(
+              canManualControl
+                  ? Icons.handyman_outlined
+                  : Icons.swap_vert_circle_outlined,
+            ),
+            selectedIcon: Icon(
+              canManualControl
+                  ? Icons.handyman_rounded
+                  : Icons.swap_vert_circle_rounded,
+            ),
+            label: canManualControl
+                ? (isAr ? 'يدوي وحساسات' : 'Manual PLC')
+                : l10n.navOperations,
           ),
           if (canViewAlarms)
             NavigationDestination(
@@ -417,6 +398,89 @@ class _MainShellScreenState extends ConsumerState<MainShellScreen> {
             label: l10n.navMore,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildConnectionStatusBar(
+    AppState appState,
+    ConnectionPhase phase,
+    bool isAr,
+  ) {
+    final Color dotColor;
+    final String label;
+    final IconData icon;
+    switch (phase) {
+      case ConnectionPhase.connected:
+        dotColor = AppColors.statusOnline;
+        label = isAr ? 'متصل مباشر' : 'Connected';
+        icon = Icons.cloud_done_rounded;
+        break;
+      case ConnectionPhase.reconnecting:
+        dotColor = AppColors.statusWarning;
+        label = isAr ? 'جاري إعادة الاتصال...' : 'Reconnecting...';
+        icon = Icons.sync_rounded;
+        break;
+      case ConnectionPhase.offline:
+        dotColor = AppColors.statusError;
+        label = isAr ? 'غير متصل' : 'Offline';
+        icon = Icons.cloud_off_rounded;
+        break;
+    }
+
+    final shortHost = appState.serverHost
+        .replaceFirst('https://', '')
+        .replaceFirst('http://', '');
+
+    return Material(
+      color: AppColors.surfaceDark.withOpacity(0.75),
+      child: InkWell(
+        onTap: () => ServerUrlDialog.show(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          child: Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: dotColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(icon, size: 14, color: dotColor),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: dotColor,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  shortHost,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: AppColors.statusOffline,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(
+                Icons.settings_ethernet_rounded,
+                size: 14,
+                color: AppColors.statusOffline,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

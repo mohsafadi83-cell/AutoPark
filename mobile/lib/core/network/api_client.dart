@@ -607,4 +607,35 @@ class ApiClient {
         );
         return r.data ?? const {};
       });
+
+  /// Direct manual PLC control bit write (mirrors desktop ManualMaintenancePage).
+  Future<Map<String, dynamic>> sendManualControl(
+    String controlKey,
+    bool active,
+  ) =>
+      _guard(() async {
+        final r = await _dio.post<Map<String, dynamic>>(
+          '/industrial/s7/manual',
+          data: {'controlKey': controlKey, 'active': active},
+        );
+        return r.data ?? const {'ok': true};
+      });
+
+  /// Direct S7 PLC tag write (used for M0.3 manual action, M0.4 accept_action_manual, and slot resets).
+  Future<Map<String, dynamic>> writeLivePlcTag(
+    String address,
+    dynamic value, {
+    int pulseMs = 0,
+  }) =>
+      _guard(() async {
+        final r = await _dio.post<Map<String, dynamic>>(
+          '/industrial/s7/write',
+          data: {
+            'address': address,
+            'value': value,
+            if (pulseMs > 0) 'pulseMs': pulseMs,
+          },
+        );
+        return r.data ?? const {'ok': true};
+      });
 }

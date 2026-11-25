@@ -101,6 +101,37 @@ class _ServerUrlDialogState extends ConsumerState<ServerUrlDialog> {
                 helperMaxLines: 2,
               ),
             ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                ActionChip(
+                  avatar: const Icon(Icons.public_rounded, size: 15),
+                  label: const Text('Remote (176.28.134.53)', style: TextStyle(fontSize: 11.5)),
+                  onPressed: () {
+                    _ctrl.text = 'http://176.28.134.53:3000';
+                    _testConnection(l10n);
+                  },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.public_rounded, size: 15),
+                  label: const Text('Legacy (46.185.128.165)', style: TextStyle(fontSize: 11.5)),
+                  onPressed: () {
+                    _ctrl.text = 'http://46.185.128.165:3000';
+                    _testConnection(l10n);
+                  },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.lan_rounded, size: 15),
+                  label: const Text('Company LAN (192.168.0.30)', style: TextStyle(fontSize: 11.5)),
+                  onPressed: () {
+                    _ctrl.text = 'http://192.168.0.30:3000';
+                    _testConnection(l10n);
+                  },
+                ),
+              ],
+            ),
             const SizedBox(height: 12),
             Row(
               children: [

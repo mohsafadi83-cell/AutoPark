@@ -14,6 +14,8 @@ import '../services/device_identity_service.dart';
 import '../storage/preferences_storage.dart';
 import '../storage/token_storage.dart';
 
+enum ConnectionPhase { connected, reconnecting, offline }
+
 class AppState {
   const AppState({
     this.isBootstrapping = true,
@@ -29,6 +31,7 @@ class AppState {
     this.networkOnline = true,
     this.backendReachable = true,
     this.socketConnected = false,
+    this.socketReconnecting = false,
     this.dashboard,
     this.systemStatus,
     this.activeRequests = const [],
@@ -51,6 +54,7 @@ class AppState {
   final bool networkOnline;
   final bool backendReachable;
   final bool socketConnected;
+  final bool socketReconnecting;
   final DashboardSummary? dashboard;
   final SystemStatus? systemStatus;
   final List<ParkingRequest> activeRequests;
@@ -58,6 +62,13 @@ class AppState {
   final List<Vehicle> vehicles;
   final List<Alarm> alarms;
   final List<AppNotification> notifications;
+
+  ConnectionPhase get connectionPhase {
+    if (!networkOnline) return ConnectionPhase.offline;
+    if (backendReachable && socketConnected) return ConnectionPhase.connected;
+    if (socketReconnecting || backendReachable) return ConnectionPhase.reconnecting;
+    return ConnectionPhase.offline;
+  }
 
   bool get isAuthenticated => user != null;
 
@@ -89,6 +100,7 @@ class AppState {
     bool? networkOnline,
     bool? backendReachable,
     bool? socketConnected,
+    bool? socketReconnecting,
     DashboardSummary? dashboard,
     SystemStatus? systemStatus,
     List<ParkingRequest>? activeRequests,
@@ -111,6 +123,7 @@ class AppState {
         networkOnline: networkOnline ?? this.networkOnline,
         backendReachable: backendReachable ?? this.backendReachable,
         socketConnected: socketConnected ?? this.socketConnected,
+        socketReconnecting: socketReconnecting ?? this.socketReconnecting,
         dashboard: dashboard ?? this.dashboard,
         systemStatus: systemStatus ?? this.systemStatus,
         activeRequests: activeRequests ?? this.activeRequests,
@@ -234,7 +247,19 @@ class AppController extends StateNotifier<AppState> {
     _rtSubs.add(
       _realtime.connectedStream.listen((connected) {
         if (mounted) {
-          state = state.copyWith(socketConnected: connected);
+          state = state.copyWith(
+            socketConnected: connected,
+            socketReconnecting: connected ? false : state.socketReconnecting,
+            backendReachable: connected ? true : state.backendReachable,
+          );
+        }
+      }),
+    );
+
+    _rtSubs.add(
+      _realtime.reconnectingStream.listen((reconnecting) {
+        if (mounted) {
+          state = state.copyWith(socketReconnecting: reconnecting);
         }
       }),
     );
@@ -556,6 +581,19 @@ class AppController extends StateNotifier<AppState> {
     await refreshDashboardSilent();
     return res;
   }
+
+  Future<Map<String, dynamic>> sendManualControl(
+    String controlKey,
+    bool active,
+  ) =>
+      _api.sendManualControl(controlKey, active);
+
+  Future<Map<String, dynamic>> writeLivePlcTag(
+    String address,
+    dynamic value, {
+    int pulseMs = 0,
+  }) =>
+      _api.writeLivePlcTag(address, value, pulseMs: pulseMs);
 
   Future<void> logout() async {
     _realtime.disconnect();
