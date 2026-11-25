@@ -23,6 +23,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _rememberMe = true;
   bool _submitting = false;
   String? _errorBanner;
+  int _failedAttempts = 0;
+  DateTime? _lockoutUntilUtc;
 
   @override
   void initState() {
@@ -40,6 +42,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    if (_lockoutUntilUtc != null && DateTime.now().toUtc().isBefore(_lockoutUntilUtc!)) {
+      final rem = _lockoutUntilUtc!.difference(DateTime.now().toUtc()).inSeconds.clamp(1, 60);
+      setState(() {
+        _errorBanner = isAr
+            ? 'محاولات دخول فاشلة متكررة. حاول مجدداً بعد $rem ثانية.'
+            : 'Too many failed attempts. Try again in ${rem}s.';
+      });
+      return;
+    }
     setState(() {
       _submitting = true;
       _errorBanner = null;
@@ -51,11 +63,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             password: _passwordCtrl.text,
             rememberMe: _rememberMe,
           );
+      _failedAttempts = 0;
+      _lockoutUntilUtc = null;
+      _passwordCtrl.clear();
     } on ApiError catch (e) {
       if (!mounted) return;
-      setState(() => _errorBanner = e.localizedMessage(l10n));
+      _failedAttempts++;
+      _passwordCtrl.clear();
+      if (_failedAttempts >= 5) {
+        _lockoutUntilUtc = DateTime.now().toUtc().add(const Duration(seconds: 60));
+        _failedAttempts = 0;
+        setState(() {
+          _errorBanner = isAr
+              ? 'تم قفل الدخول لمدة 60 ثانية بسبب محاولات فاشلة متكررة.'
+              : 'Sign-in locked for 60s due to repeated failed attempts.';
+        });
+      } else {
+        setState(() => _errorBanner = e.localizedMessage(l10n));
+      }
     } catch (_) {
       if (!mounted) return;
+      _passwordCtrl.clear();
       setState(() => _errorBanner = l10n.errGeneric);
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -78,14 +106,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
-  }
-
-  void _fillDemo(String user, String pass) {
-    setState(() {
-      _usernameCtrl.text = user;
-      _passwordCtrl.text = pass;
-      _errorBanner = null;
-    });
   }
 
   @override
@@ -435,36 +455,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         const SizedBox(height: 18),
                         const Divider(),
                         const SizedBox(height: 8),
-                        Text(
-                          l10n.demoAccounts,
-                          style:
-                              Theme.of(context).textTheme.labelMedium?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            ActionChip(
-                              label: const Text('superadmin'),
-                              onPressed: () =>
-                                  _fillDemo('superadmin', 'Admin@12345'),
-                            ),
-                            ActionChip(
-                              label: const Text('operator'),
-                              onPressed: () =>
-                                  _fillDemo('operator', 'Operator@123'),
-                            ),
-                            ActionChip(
-                              label: const Text('engineer'),
-                              onPressed: () =>
-                                  _fillDemo('engineer', 'Engineer@123'),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
                         Text(
                           isArabic
                               ? '🔒 الدخول عبر التطبيق مخصص للموظفين المعرّفين بأجهزتهم المسجّلة فقط.'

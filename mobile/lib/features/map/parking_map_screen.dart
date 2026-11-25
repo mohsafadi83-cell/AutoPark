@@ -29,12 +29,12 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
 
   String _floorDescription(int level, bool isAr) {
     switch (level) {
-      case 3:
-        return isAr ? 'P3 (سطح الأرض — دخول وخروج)' : 'P3 (Ground Level — Entry/Exit)';
+      case 1:
+        return isAr ? 'P1 (الطابق العلوي — Level 1 / LS_BTM)' : 'P1 (Top Level — Level 1 / LS_BTM)';
       case 2:
-        return isAr ? 'P2 (الطابق الأوسط تحت الأرض)' : 'P2 (Middle Underground)';
+        return isAr ? 'P2 (الطابق الأوسط — Level 2 / LS_MID)' : 'P2 (Mid Level — Level 2 / LS_MID)';
       default:
-        return isAr ? 'P1 (الطابق السفلي تحت الأرض)' : 'P1 (Lower Underground)';
+        return isAr ? 'P3 (الطابق السفلي — Level 3 / LS_TOP)' : 'P3 (Bottom Level — Level 3 / LS_TOP)';
     }
   }
 
@@ -326,8 +326,8 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
       liftIcon = Icons.check_circle_rounded;
       liftTitle = isAr ? 'المصعد في وضع الانتظار — جاهز' : 'Lift Standby — Ready';
       liftSubtitle = isAr
-          ? 'الموقع الحالي: موضع الانتظار المعتمد • P3 سطح الأرض (دخول/خروج)'
-          : 'Current Position: Engineered Home • P3 Ground Entry/Exit';
+          ? 'الموقع الحالي: موضع الانتظار المعتمد (Home — LS_BTM)'
+          : 'Current Position: Engineered Home (LS_BTM)';
     }
 
     return RefreshIndicator(
@@ -438,14 +438,14 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
                   onSelected: (_) => setState(() => _selectedLevel = null),
                 ),
                 const SizedBox(width: 6),
-                for (final lvl in levels.reversed) ...[
+                for (final lvl in levels) ...[
                   ChoiceChip(
                     label: Text(
-                      lvl == 3
-                          ? (isAr ? 'P3 سطح الأرض' : 'P3 Ground')
+                      lvl == 1
+                          ? (isAr ? 'P1 علوي' : 'P1 Top')
                           : (lvl == 2
                               ? (isAr ? 'P2 أوسط' : 'P2 Mid')
-                              : (isAr ? 'P1 سفلي' : 'P1 Lower')),
+                              : (isAr ? 'P3 سفلي' : 'P3 Bottom')),
                     ),
                     selected: _selectedLevel == lvl,
                     onSelected: (_) => setState(() => _selectedLevel = lvl),
