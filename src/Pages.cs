@@ -868,6 +868,13 @@ namespace AutoPark
             _btnPauseTimer.SetBounds(318, 424, 130, 40);
             _btnPauseTimer.Click += delegate
             {
+                var ps = ParkState.Instance;
+                if (ps.EmergencyStop || ps.Sensors.EmergencyPhysical)
+                {
+                    _lblStepStatus.ForeColor = Theme.Err;
+                    _lblStepStatus.Text = Loc.T("🔴 Cannot pause/resume while Emergency Stop is active!", "🔴 لا يمكن الإيقاف المؤقت أو الاستئناف أثناء تفعيل إيقاف الطوارئ!");
+                    return;
+                }
                 _timerPaused = !_timerPaused;
                 bool pausedNow = _timerPaused;
                 if (pausedNow)
@@ -880,14 +887,42 @@ namespace AutoPark
                     _pauseStartUtc = DateTime.MinValue;
                 }
                 _btnPauseTimer.Text = pausedNow
-                    ? Loc.T("▶ Resume", "▶ استئناف")
+                    ? Loc.T("▶ Continue", "▶ استئناف / متابعة")
                     : Loc.T("⏸ Pause", "⏸ إيقاف مؤقت");
                 _btnPauseTimer.BaseColor = pausedNow ? Theme.Ok : Theme.Blue;
                 _lblStepStatus.ForeColor = pausedNow ? Theme.Amber : Theme.Ok;
-                // Display-only timer pause: NEVER writes or interrupts PLC motion!
                 _lblStepStatus.Text = pausedNow
-                    ? Loc.T("⏸ Display timer paused (PLC unaffected).", "⏸ تم إيقاف عداد الوقت للعرض فقط (بدون التأثير على الـ PLC).")
-                    : Loc.T("▶ Display timer resumed — reading live PLC sensors.", "▶ تم استئناف عداد الوقت — جاري عرض قراءات الحساسات الحية.");
+                    ? Loc.T("⏸ PAUSED — Lift held safely. Click '▶ Continue' to resume.", "⏸ إيقاف مؤقت — تم تعليق المصعد بأمان. اضغط '▶ استئناف / متابعة' للإكمال.")
+                    : Loc.T("▶ CONTINUING — Resuming PLC movement cleanly...", "▶ جاري الاستئناف — إعادة متابعة حركة الـ PLC...");
+
+                bool step1StillPending = (_stepIndex < _dynamicSteps.Count);
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                {
+                    if (pausedNow)
+                    {
+                        // Cleanly pause Auto motion on S7-1200 without triggering an E-Stop alarm
+                        ps.SendPlcWriteBool("M10.0", false, 0);     // Pause Step 1 Start
+                        ps.SendPlcWriteBool("M10.1", false, 0);     // Pause Step 2 Start
+                        ps.SendPlcWriteBool("DB1,X0.3", false, 0);  // Hold Auto_DB = 0
+                    }
+                    else
+                    {
+                        // Resume Auto Mode and continue active sequence cleanly
+                        ps.SendPlcWriteBool("DB1,X0.3", true, 0);   // Auto_DB = 1
+                        if (step1StillPending)
+                        {
+                            ps.SendPlcWriteBool("DB2,X5.4", true, 0);
+                            System.Threading.Thread.Sleep(150);
+                            ps.SendPlcWriteBool("M10.0", true, 0);
+                            ps.SendPlcWriteBool("DB2,X5.4", false, 0);
+                        }
+                        else if (ps.Sensors.Step2Ready)
+                        {
+                            ps.SendPlcWriteBool("M10.1", true, 0);
+                            ps.SendPlcWriteBool("DB2,X5.6", false, 0);
+                        }
+                    }
+                });
             };
 
             var btnClose = new ModernButton
@@ -1115,11 +1150,18 @@ namespace AutoPark
             System.Threading.ThreadPool.QueueUserWorkItem(delegate
             {
                 var ps = ParkState.Instance;
-                bool dispatched = ps.PushOperationToBackend(opCopy, plateCopy, isOtherCopy, targetSpaceCopy);
-                _backendDispatched = dispatched;
-
-                // Wait 600ms so any older backend 350ms pulse finishes BEFORE we latch the clean TIA Portal 2-step sequence
-                System.Threading.Thread.Sleep(600);
+                // CRITICAL SAFETY GUARD: Only delegate PLC dispatch to backend /parking/request if the server has been updated
+                // (old un-updated server inverted L13->plcLevel 1 and L11->plcLevel 3!).
+                if (ps.BackendHasFixedFloorMapping)
+                {
+                    bool dispatched = ps.PushOperationToBackend(opCopy, plateCopy, isOtherCopy, targetSpaceCopy);
+                    _backendDispatched = dispatched;
+                    System.Threading.Thread.Sleep(400);
+                }
+                else
+                {
+                    _backendDispatched = true;
+                }
 
                 // Clear any leftover manual bits & ensure pure Auto Mode
                 ps.SendPlcWriteBool("DB1,X1.1", false, 0);   // Man_Pump = 0
@@ -1134,7 +1176,7 @@ namespace AutoPark
                 ps.SendPlcWriteBool("M0.4", false, 0);       // Accept_action_manual = 0
                 ps.SendPlcWriteBool("DB1,X0.3", true, 0);    // Auto_DB = 1
 
-                // Step A: Write Lane_Number (DB2,B3) & Level_Number (DB2,B4) + exact TIA Portal PDF pp. 42-60 Park_IN_START / Park_OUT_START
+                // Step A: Write EXACT 1:1 TIA Portal Lane_Number (DB2,B3) & Level_Number (DB2,B4: Lx1=1, Lx2=2, Lx3=3)
                 ps.SendPlcWrite("DB2,B3", laneCopy, 0);      // ParkDB.Lane_Number (Byte @ 3.0)
                 ps.SendPlcWrite("DB2,B4", levelCopy, 0);     // ParkDB.Level_Number (Byte @ 4.0)
                 if (opCopy == "PARK")

@@ -640,6 +640,7 @@ namespace AutoPark
         public bool EmergencyStop = false;
         public string BackendToken = "";
         public bool BackendConnected = false;
+        public bool BackendHasFixedFloorMapping = false;
         public string ApiBaseUrl = "http://192.168.0.30:3000/api/v1";
         public event Action Changed;
 
@@ -865,7 +866,13 @@ namespace AutoPark
             try
             {
                 string json = HttpSend("GET", baseUrl.TrimEnd('/') + "/health", null);
-                return json != null && json.Contains("\"ok\"");
+                bool ok = json != null && json.Contains("\"ok\"");
+                if (ok)
+                {
+                    // Updated server (post-enterprise fix) includes uptimeSeconds & fixed 1:1 floor mapping (L13->3, L11->1)
+                    BackendHasFixedFloorMapping = json.Contains("\"uptimeSeconds\"");
+                }
+                return ok;
             }
             catch
             {
