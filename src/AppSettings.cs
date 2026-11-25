@@ -591,16 +591,16 @@ namespace AutoPark
         public bool[] MgProt = new bool[] { false, false, false, false };
         public bool[] MgProtMapped = new bool[4];
         public bool[] CheckLocation = new bool[] { false, false, false, false };
-        public int[] CurrentFloor = new int[] { 0, 0, 0, 0 }; // 1=P1(BTM), 2=P2(MID), 3=P3(TOP), 0=Unmapped/Between
+        public int[] CurrentFloor = new int[] { 3, 3, 3, 3 }; // 1=P1(BTM), 2=P2(MID), 3=P3(TOP)
         public string LastSyncTime = "—";
 
         public PlcSensorsSnapshot()
         {
             for (int l = 0; l < 4; l++)
             {
-                LimitSwitches[l, 0] = true; // default BTM (P1)
+                LimitSwitches[l, 0] = false;
                 LimitSwitches[l, 1] = false;
-                LimitSwitches[l, 2] = false;
+                LimitSwitches[l, 2] = true; // default TOP (P3 / Floor 3)
             }
         }
 

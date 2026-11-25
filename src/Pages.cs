@@ -988,7 +988,7 @@ namespace AutoPark
                 return;
             }
 
-            int startFloor = (lane >= 1 && lane <= 4 && sens.CurrentFloor[lane - 1] >= 1) ? sens.CurrentFloor[lane - 1] : 1;
+            int startFloor = (lane >= 1 && lane <= 4 && sens.CurrentFloor[lane - 1] >= 1) ? sens.CurrentFloor[lane - 1] : 3;
             string floorName = targetUiFloor == 3
                 ? Loc.T("P3 (Top — PLC Level 3)", "P3 (العلوي — PLC Level 3)")
                 : (targetUiFloor == 2 ? Loc.T("P2 (Mid — PLC Level 2)", "P2 (الأوسط — PLC Level 2)") : Loc.T("P1 (Bottom — PLC Level 1)", "P1 (السفلي — PLC Level 1)"));
