@@ -119,7 +119,7 @@ class _ManualPlcControlScreenState
     );
     if (_manualEnabled) {
       unawaited(
-        notifier.sendManualControl('manual_mode_tag', false).catchError((_) => const <String, dynamic>{}),
+        notifier.sendManualControl('auto_mode_tag', true).catchError((_) => const <String, dynamic>{}),
       );
     }
   }
@@ -221,7 +221,11 @@ class _ManualPlcControlScreenState
           reasonAr: 'العودة للوضع التلقائي — تم إيقاف جميع المخارج',
         );
       }
-      await notifier.sendManualControl('manual_mode_tag', enable);
+      if (enable) {
+        await notifier.sendManualControl('manual_mode_tag', true);
+      } else {
+        await notifier.sendManualControl('auto_mode_tag', true);
+      }
       HapticFeedback.mediumImpact();
       if (!mounted) return;
       setState(() {
