@@ -436,7 +436,8 @@ namespace AutoPark
                     stackTable.RowStyles.Add(new RowStyle(SizeType.Percent, 33.33f));
 
                 var laneSpaces = spaces.FindAll(s => s.ColumnNumber == lane);
-                laneSpaces.Sort((a, b) => b.PositionInColumn.CompareTo(a.PositionInColumn));
+                // 1A: Exact TIA Portal PDF order: L11 (Level 1 Top) -> L12 (Level 2 Mid) -> L13 (Level 3 Bottom)
+                laneSpaces.Sort((a, b) => a.PositionInColumn.CompareTo(b.PositionInColumn));
                 for (int r = 0; r < 3 && r < laneSpaces.Count; r++)
                 {
                     stackTable.Controls.Add(CreateSpaceCard(laneSpaces[r]), 0, r);
@@ -794,6 +795,11 @@ namespace AutoPark
                 ps.NotifyChanged();
                 System.Threading.ThreadPool.QueueUserWorkItem(delegate
                 {
+                    // 3 Yes: Official TIA Portal Button_3 Cancel (PDF p. 112) + ESTOP_ON
+                    ps.SendPlcWriteBool("M10.0", false, 0);      // ResetBit(Park_IN_Step1_Start)
+                    ps.SendPlcWriteBool("M3.1", true, 400);      // SetBitWhileKeyPressed(cancel_this_step)
+                    ps.SendPlcWriteBool("DB2,X5.4", false, 0);   // ResetBit(Park_Step1_Ready)
+                    ps.SendPlcWriteBool("DB2,X5.6", false, 0);   // ResetBit(Park_Step2_Ready)
                     ps.SendRecoveryAction("ESTOP_ON");
                     ps.CancelLatestActiveRequestOnBackend();
                     if (wasPark && !string.IsNullOrEmpty(spotCodeCopy))
@@ -1027,10 +1033,10 @@ namespace AutoPark
                 return;
             }
 
-            int startFloor = (lane >= 1 && lane <= 4 && sens.CurrentFloor[lane - 1] >= 1) ? sens.CurrentFloor[lane - 1] : 3;
-            string floorName = targetUiFloor == 3
-                ? Loc.T("P3 (Top — PLC Level 3)", "P3 (العلوي — PLC Level 3)")
-                : (targetUiFloor == 2 ? Loc.T("P2 (Mid — PLC Level 2)", "P2 (الأوسط — PLC Level 2)") : Loc.T("P1 (Bottom — PLC Level 1)", "P1 (السفلي — PLC Level 1)"));
+            int startFloor = (lane >= 1 && lane <= 4 && sens.CurrentFloor[lane - 1] >= 1) ? sens.CurrentFloor[lane - 1] : 1;
+            string floorName = targetUiFloor == 1
+                ? Loc.T("Top (Level 1 — LS_BTM)", "العلوي (Level 1 — LS_BTM)")
+                : (targetUiFloor == 2 ? Loc.T("Mid (Level 2 — LS_MID)", "الأوسط (Level 2 — LS_MID)") : Loc.T("Bottom (Level 3 — LS_TOP)", "السفلي (Level 3 — LS_TOP)"));
 
             var confirm = Loc.ShowMsg(
                 "Confirm Industrial PLC Operation (2-Step Sequence):\n\n" +
@@ -1128,23 +1134,28 @@ namespace AutoPark
                 ps.SendPlcWriteBool("M0.4", false, 0);       // Accept_action_manual = 0
                 ps.SendPlcWriteBool("DB1,X0.3", true, 0);    // Auto_DB = 1
 
-                // Step A: Write Lane_Number (DB2,B3) & Level_Number (DB2,B4) + Mode bit (Park_IN / Park_OUT)
+                // Step A: Write Lane_Number (DB2,B3) & Level_Number (DB2,B4) + exact TIA Portal PDF pp. 42-60 Park_IN_START / Park_OUT_START
                 ps.SendPlcWrite("DB2,B3", laneCopy, 0);      // ParkDB.Lane_Number (Byte @ 3.0)
                 ps.SendPlcWrite("DB2,B4", levelCopy, 0);     // ParkDB.Level_Number (Byte @ 4.0)
                 if (opCopy == "PARK")
                 {
                     if (laneCopy >= 1 && laneCopy <= 4)
                         ps.SendPlcWriteBool("M3." + (3 + laneCopy), true, 0); // Lane1..4_check_location
+                    ps.SendPlcWriteBool("DB2,X2.6", false, 0); // Park_OUT_START = 0
+                    ps.SendPlcWriteBool("DB2,X2.5", true, 0);  // Park_IN_START = 1 (PDF pp. 42-51)
                     ps.SendPlcWriteBool("DB2,X6.4", false, 0); // Park_OUT = 0
                     ps.SendPlcWriteBool("DB2,X6.3", true, 0);  // Park_IN = 1
                 }
                 else
                 {
+                    ps.SendPlcWriteBool("DB2,X2.5", false, 0); // Park_IN_START = 0
+                    ps.SendPlcWriteBool("DB2,X2.6", true, 0);  // Park_OUT_START = 1 (PDF pp. 52-60)
                     ps.SendPlcWriteBool("DB2,X6.3", false, 0); // Park_IN = 0
                     ps.SendPlcWriteBool("DB2,X6.4", true, 0);  // Park_OUT = 1
                 }
 
-                // Step B: Wait 250ms for PLC scan to latch Lane/Level/Mode, then execute exact TIA Portal Page 108 Step 1 start
+                // Step B: Exact TIA Portal Page 103 (Step1_Ready=1) & Page 108 (Step1_Start=1, Step1_Ready=0)
+                ps.SendPlcWriteBool("DB2,X5.4", true, 0);    // SetBit(Park_Step1_Ready)
                 System.Threading.Thread.Sleep(250);
                 ps.SendPlcWriteBool("M10.0", true, 0);       // SetBit(Park_IN_Step1_Start)
                 ps.SendPlcWriteBool("DB2,X5.4", false, 0);   // ResetBit(Park_Step1_Ready)

@@ -565,7 +565,7 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
                                 (!s.zone.startsWith('Lane') &&
                                     filtered.indexOf(s) ~/ 3 == col))
                             .toList()
-                          ..sort((a, b) => b.level.compareTo(a.level)))) ...[
+                          ..sort((a, b) => a.level.compareTo(b.level)))) ...[
                           Padding(
                             padding: const EdgeInsets.only(bottom: 6),
                             child: _buildSpaceCard(

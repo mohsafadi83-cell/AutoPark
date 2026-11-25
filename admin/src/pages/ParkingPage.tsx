@@ -69,9 +69,9 @@ export function canCancelParkingRequest(req: ParkingRequest): boolean {
   return CANCELLABLE_CMD_STATUSES.includes(req.command.status);
 }
 
-/** Sorts tower bays top-to-bottom (P3 Top -> P2 Mid -> P1 Bottom) to match the physical lift & Siemens KTP400 HMI. */
+/** Sorts tower bays top-to-bottom per TIA Portal PDF (L11 Level 1 Top -> L12 Level 2 Mid -> L13 Level 3 Bottom). */
 export function sortTowerSpacesTopDown<T extends { level: number }>(spaces: T[]): T[] {
-  return [...spaces].sort((a, b) => b.level - a.level);
+  return [...spaces].sort((a, b) => a.level - b.level);
 }
 
 const SPACE_BORDER_COLOR: Record<SpaceStatus, string> = {

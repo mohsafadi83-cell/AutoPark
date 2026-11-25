@@ -1134,9 +1134,13 @@ export class SiemensS7Adapter implements IndustrialController {
     await this.tryWriteLogicalTag('level_number_tag', plcLevel);
 
     if (cmd.type === 'PARK') {
+      await this.tryWriteLogicalTag('park_out_start_db_tag', false);
+      await this.tryWriteLogicalTag('park_in_start_db_tag', true);
       await this.tryWriteLogicalTag('retrieve_command_tag', false);
       await this.tryWriteLogicalTag('park_command_tag', true);
     } else {
+      await this.tryWriteLogicalTag('park_in_start_db_tag', false);
+      await this.tryWriteLogicalTag('park_out_start_db_tag', true);
       await this.tryWriteLogicalTag('park_command_tag', false);
       await this.tryWriteLogicalTag('retrieve_command_tag', true);
     }
