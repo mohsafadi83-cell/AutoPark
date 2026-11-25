@@ -785,13 +785,14 @@ namespace AutoPark
                 BaseColor = Theme.Amber,
                 HoverColor = Color.FromArgb(180, 83, 9),
                 PressColor = Theme.Ok,
-                ForeColor = Color.White
+                ForeColor = Color.White,
+                Enabled = false
             };
             _btnReturnGround.SetBounds(22, 424, 290, 40);
             _btnReturnGround.Click += delegate
             {
                 var ps = ParkState.Instance;
-                if (ps.IsPlcCommandBusy) return;
+                if (ps.IsPlcCommandBusy || !_btnReturnGround.Enabled) return;
                 if (ps.EmergencyStop || ps.Sensors.EmergencyPhysical)
                 {
                     Loc.ShowMsg("Cannot lower lift while Emergency Stop is active!", "لا يمكن إنزال المصعد أثناء تفعيل إيقاف الطوارئ!", "Safety", "أمان", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -799,10 +800,13 @@ namespace AutoPark
                 }
                 _btnReturnGround.Enabled = false;
                 _lblStepStatus.ForeColor = Theme.Amber;
-                _lblStepStatus.Text = Loc.T("⬇ Lowering lift to Home Position (PLC Step 2)...", "⬇ جاري إرجاع المصعد للوضع الابتدائي (Home)...");
+                _lblStepStatus.Text = Loc.T("⬇ Lowering lift to Home Position (Step 2: M10.1=1, DB2,X5.6=0)...", "⬇ جاري إرجاع المصعد للوضع الابتدائي (المرحلة 2: M10.1=1)...");
                 System.Threading.ThreadPool.QueueUserWorkItem(delegate
                 {
-                    string resp = ps.SendRecoveryAction("RETURN_PARK");
+                    // Exact TIA Portal Page 104 Step 2 sequence (sequential via _plcCommandLock):
+                    ps.SendPlcWriteBool("DB1,X0.3", true, 0);        // Auto_DB = 1
+                    string r1 = ps.SendPlcWriteBool("M10.1", true, 0);     // SetBit(Park_IN_Step2_Start)
+                    string r2 = ps.SendPlcWriteBool("DB2,X5.6", false, 0); // ResetBit(Park_Step2_Ready)
                     if (!IsDisposed && IsHandleCreated)
                     {
                         try
@@ -810,18 +814,18 @@ namespace AutoPark
                             BeginInvoke((Action)delegate
                             {
                                 _btnReturnGround.Enabled = true;
-                                bool ok = string.IsNullOrEmpty(resp) || !resp.StartsWith("ERR:");
+                                bool ok = (string.IsNullOrEmpty(r1) || !r1.StartsWith("ERR:")) && (string.IsNullOrEmpty(r2) || !r2.StartsWith("ERR:"));
                                 _lblStepStatus.ForeColor = ok ? Theme.Ok : Theme.Err;
                                 _lblStepStatus.Text = ok
-                                    ? Loc.T("✅ Lift returning to Home Position (confirmed by PLC).", "✅ تم إرسال أمر إرجاع المصعد للوضع الابتدائي بنجاح.")
-                                    : Loc.T("⚠ Lower to Home failed: " + resp, "⚠ تعذر إرجاع المصعد: " + resp);
+                                    ? Loc.T("✅ Lift returning to Home Position (Step 2 M10.1=1 confirmed by PLC).", "✅ تم إرسال أمر إرجاع المصعد للوضع الابتدائي بنجاح (M10.1=1).")
+                                    : Loc.T("⚠ Lower to Home failed: " + r1 + " " + r2, "⚠ تعذر إرجاع المصعد: " + r1 + " " + r2);
                             });
                         }
                         catch { }
                     }
                 });
                 ps.RecordLocalAudit("LOWER_TO_HOME", _chosenSpace != null ? _chosenSpace.SpaceNumber : "LIFT",
-                    Loc.T("Lower lift to Home Position (Step 2 RETURN_PARK)", "إرجاع المصعد للوضع الابتدائي (Step 2 RETURN_PARK)"), Loc.UserDisplay(_shell.CurrentUser));
+                    Loc.T("Lower lift to Home Position (M10.1=1, DB2,X5.6=0)", "إرجاع المصعد للوضع الابتدائي (M10.1=1, DB2,X5.6=0)"), Loc.UserDisplay(_shell.CurrentUser));
             };
 
             _btnPauseTimer = new ModernButton
@@ -1059,6 +1063,7 @@ namespace AutoPark
             _progress.Value = 0;
 
             _btnExecute.Enabled = false;
+            _btnReturnGround.Enabled = false; // Never allow pre-queued Return Home while lift is moving!
             _btnCancelStep.Enabled = true;
             _cmbVehicle.Enabled = false;
             _txtPlate.Enabled = false;
@@ -1176,14 +1181,14 @@ namespace AutoPark
                     bool lsReached = st.Sensors.LimitSwitches[lane - 1, stepCode - 1];
                     bool reached = lsReached;
 
-                    if (!reached && _waitTicks < 180)
+                    if (!reached && _waitTicks < 45)
                     {
                         _waitTicks++;
                         _lblElevatorPos.ForeColor = Theme.Amber;
                         string lsName = "PL" + lane + "_LS_" + (stepCode == 3 ? "TOP" : (stepCode == 2 ? "MID" : "BTM"));
                         _lblElevatorPos.Text = Loc.T(
-                            "⏳ Lifting to Floor P" + stepCode + " — waiting for real PLC sensor " + lsName + " (" + _waitTicks + "s)...",
-                            "⏳ جاري رفع/تحريك المصعد للطابق P" + stepCode + " — بانتظار تأكيد الحساس الفعلي " + lsName + " (" + _waitTicks + " ث)...");
+                            "⏳ Lifting to Floor P" + stepCode + " — waiting for PLC sensor " + lsName + " (" + _waitTicks + "/45s)...",
+                            "⏳ جاري تحريك المصعد للطابق P" + stepCode + " — بانتظار الحساس الفعلي " + lsName + " (" + _waitTicks + "/45 ث)...");
                         return;
                     }
                     if (!reached)
@@ -1320,6 +1325,7 @@ namespace AutoPark
                         "✅ تم الإيداع بنجاح (المصف " + _chosenSpace.SpaceNumber + ")! بعد خروج السائق، اضغط زر '⬇ إرجاع المصعد للوضع الابتدائي (Home)'.")
                 : Loc.T("✅ Vehicle ready at Bay " + _chosenSpace.SpaceNumber + "! After driver clears lift, press '⬇ Lower Lift to Home Position'.",
                         "✅ المركبة جاهزة في المصف " + _chosenSpace.SpaceNumber + "! بعد ابتعاد السائق، اضغط زر '⬇ إرجاع المصعد للوضع الابتدائي (Home)'.");
+            _btnReturnGround.Enabled = true;
             _btnReturnGround.BaseColor = Theme.Ok;
             _btnReturnGround.Invalidate();
             Loc.ShowMsg(
