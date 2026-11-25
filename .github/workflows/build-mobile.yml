@@ -9,12 +9,12 @@ on:
   workflow_dispatch:
     inputs:
       api_base_url:
-        description: 'Company Server Public API URL (NAT)'
+        description: 'Company Server Public HTTPS API URL'
         required: true
-        default: 'http://46.185.128.165:3000'
+        default: 'https://crawford-dealers-logos-had.trycloudflare.com'
 
 env:
-  API_BASE_URL: ${{ github.event.inputs.api_base_url || 'http://46.185.128.165:3000' }}
+  API_BASE_URL: ${{ github.event.inputs.api_base_url || 'https://crawford-dealers-logos-had.trycloudflare.com' }}
 
 permissions:
   contents: write

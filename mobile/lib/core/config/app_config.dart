@@ -34,16 +34,16 @@ class AppConfig {
       return 'http://localhost:3000';
     }
     if (defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://46.185.128.165:3000';
+      return 'https://crawford-dealers-logos-had.trycloudflare.com';
     }
-    return 'http://46.185.128.165:3000';
+    return 'https://crawford-dealers-logos-had.trycloudflare.com';
   }
 
-  /// Ordered fallback hosts probed when login hits a network/timeout error
-  /// (primary company server 46.185.128.165 + internal LAN 192.168.0.30).
+  /// Ordered fallback hosts probed when login hits a network/timeout error.
   static const List<String> fallbackHosts = <String>[
-    'http://46.185.128.165:3000',
+    'https://crawford-dealers-logos-had.trycloudflare.com',
     'http://192.168.0.30:3000',
+    'http://46.185.128.165:3000',
   ];
 
   /// The compile-time default host (dart-define or platform default).
