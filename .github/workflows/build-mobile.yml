@@ -11,10 +11,10 @@ on:
       api_base_url:
         description: 'Company Server Public API URL (NAT)'
         required: true
-        default: 'http://92.253.111.78:3000'
+        default: 'http://46.185.128.165:3000'
 
 env:
-  API_BASE_URL: ${{ github.event.inputs.api_base_url || 'http://92.253.111.78:3000' }}
+  API_BASE_URL: ${{ github.event.inputs.api_base_url || 'http://46.185.128.165:3000' }}
 
 permissions:
   contents: write

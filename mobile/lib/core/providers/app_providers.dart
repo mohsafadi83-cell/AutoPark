@@ -22,7 +22,7 @@ class AppState {
     this.isBootstrapping = true,
     this.locale = const Locale('en'),
     this.themeMode = ThemeMode.dark,
-    this.serverHost = 'http://92.253.111.78:3000',
+    this.serverHost = 'http://46.185.128.165:3000',
     this.deviceId = '',
     this.deviceMac = '',
     this.user,
