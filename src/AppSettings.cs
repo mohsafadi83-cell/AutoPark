@@ -45,7 +45,7 @@ namespace AutoPark
         public string IniPath;
         public string Language = "en"; // Default primary language: English ("en" | "ar")
         public string ApiBaseUrl = "http://192.168.0.30:3000/api/v1";
-        public static readonly string FallbackTunnelApiUrl = "https://wiring-ranch-shuttle-asus.trycloudflare.com/api/v1";
+        public static readonly string FallbackTunnelApiUrl = "https://copyright-commonwealth-wearing-arrives.trycloudflare.com/api/v1";
         public string PublicServerIp = "46.185.128.165";
         public string Protocol = "SIEMENS_S7";
         public string PlcModel = "Siemens SIMATIC S7-1200 CPU 1212C (192.168.0.27:102)";
@@ -860,6 +860,7 @@ namespace AutoPark
                         "http://192.168.0.30:3000/api/v1",
                         "http://localhost:3000/api/v1",
                         "http://localhost:3050/api/v1",
+                        "http://192.168.0.85:3050/api/v1",
                         "http://localhost:5173/api/v1",
                         AppSettings.FallbackTunnelApiUrl
                     };
@@ -873,6 +874,16 @@ namespace AutoPark
                             BackendConnected = true;
                             found = true;
                             break;
+                        }
+                    }
+                    if (!found)
+                    {
+                        TryAutoStartBackendProcess();
+                        if (PingHealthUrl("http://localhost:3000/api/v1"))
+                        {
+                            ApiBaseUrl = "http://localhost:3000/api/v1";
+                            BackendConnected = true;
+                            found = true;
                         }
                     }
                     if (!found)
@@ -905,14 +916,21 @@ namespace AutoPark
         {
             try
             {
-                string json = HttpSend("GET", baseUrl.TrimEnd('/') + "/health", null);
-                bool ok = json != null && json.Contains("\"ok\"");
-                if (ok)
+                var req = (HttpWebRequest)WebRequest.Create(baseUrl.TrimEnd('/') + "/health");
+                req.Method = "GET";
+                req.Timeout = 1500;
+                req.ReadWriteTimeout = 1500;
+                using (var resp = (HttpWebResponse)req.GetResponse())
+                using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
                 {
-                    // Updated server (post-enterprise fix) includes uptimeSeconds & fixed 1:1 floor mapping (L13->3, L11->1)
-                    BackendHasFixedFloorMapping = json.Contains("\"uptimeSeconds\"");
+                    string json = sr.ReadToEnd();
+                    bool ok = json != null && json.Contains("\"ok\"");
+                    if (ok)
+                    {
+                        BackendHasFixedFloorMapping = json.Contains("\"uptimeSeconds\"");
+                    }
+                    return ok;
                 }
-                return ok;
             }
             catch
             {
