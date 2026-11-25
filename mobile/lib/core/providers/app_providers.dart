@@ -8,6 +8,7 @@ import 'package:local_auth/local_auth.dart';
 import '../config/app_config.dart';
 import '../models/models.dart';
 import '../network/api_client.dart';
+import '../network/api_error.dart';
 import '../notifications/local_notification_service.dart';
 import '../realtime/realtime_service.dart';
 import '../services/device_identity_service.dart';
@@ -21,7 +22,7 @@ class AppState {
     this.isBootstrapping = true,
     this.locale = const Locale('en'),
     this.themeMode = ThemeMode.dark,
-    this.serverHost = 'http://46.185.128.165:3000',
+    this.serverHost = 'http://92.253.111.78:3000',
     this.deviceId = '',
     this.deviceMac = '',
     this.user,
@@ -383,17 +384,64 @@ class AppController extends StateNotifier<AppState> {
     state = state.copyWith(biometricEnabled: enabled);
   }
 
+  Future<String?> _discoverReachableHost() async {
+    final current = AppConfig.normalizeHost(state.serverHost);
+    final candidates = AppConfig.fallbackHosts
+        .map(AppConfig.normalizeHost)
+        .where((h) => h != current)
+        .toList();
+    if (candidates.isEmpty) return null;
+
+    final completer = Completer<String?>();
+    var remaining = candidates.length;
+    for (final host in candidates) {
+      _api.checkHealth(host).then((_) {
+        if (!completer.isCompleted) {
+          completer.complete(host);
+        }
+      }).catchError((_) {
+        remaining--;
+        if (remaining <= 0 && !completer.isCompleted) {
+          completer.complete(null);
+        }
+      });
+    }
+    return completer.future.timeout(
+      const Duration(seconds: 6),
+      onTimeout: () => null,
+    );
+  }
+
   Future<void> login({
     required String username,
     required String password,
     required bool rememberMe,
   }) async {
     await _prefs.setRememberMe(rememberMe);
-    final (user, _) = await _api.login(
-      username: username,
-      password: password,
-      rememberMe: rememberMe,
-    );
+    late final User user;
+    try {
+      final res = await _api.login(
+        username: username,
+        password: password,
+        rememberMe: rememberMe,
+      );
+      user = res.$1;
+    } on ApiError catch (e) {
+      if (!e.isNetworkError) rethrow;
+      final reachable = await _discoverReachableHost();
+      if (reachable == null) rethrow;
+      _api.updateHost(reachable);
+      await _prefs.setServerHost(reachable);
+      if (mounted) {
+        state = state.copyWith(serverHost: reachable);
+      }
+      final retry = await _api.login(
+        username: username,
+        password: password,
+        rememberMe: rememberMe,
+      );
+      user = retry.$1;
+    }
     await _prefs.cacheUser(user);
     final hasPersisted = await _tokenStorage.hasPersistedSession();
     state = state.copyWith(

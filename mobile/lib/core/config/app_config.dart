@@ -34,10 +34,19 @@ class AppConfig {
       return 'http://localhost:3000';
     }
     if (defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://46.185.128.165:3000';
+      return 'http://92.253.111.78:3000';
     }
-    return 'http://46.185.128.165:3000';
+    return 'http://92.253.111.78:3000';
   }
+
+  /// Ordered fallback hosts automatically probed when login hits a network/timeout error
+  /// (covers company LAN Wi-Fi and rotated public IPs seamlessly).
+  static const List<String> fallbackHosts = <String>[
+    'http://92.253.111.78:3000',
+    'http://192.168.0.30:3000',
+    'http://176.28.134.53:3000',
+    'http://46.185.128.165:3000',
+  ];
 
   /// The compile-time default host (dart-define or platform default).
   static String get defaultHost =>

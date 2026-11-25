@@ -108,7 +108,23 @@ class _ServerUrlDialogState extends ConsumerState<ServerUrlDialog> {
               children: [
                 ActionChip(
                   avatar: const Icon(Icons.public_rounded, size: 15),
-                  label: const Text('Remote (176.28.134.53)', style: TextStyle(fontSize: 11.5)),
+                  label: const Text('Remote (92.253.111.78)', style: TextStyle(fontSize: 11.5)),
+                  onPressed: () {
+                    _ctrl.text = 'http://92.253.111.78:3000';
+                    _testConnection(l10n);
+                  },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.lan_rounded, size: 15),
+                  label: const Text('Company LAN (192.168.0.30)', style: TextStyle(fontSize: 11.5)),
+                  onPressed: () {
+                    _ctrl.text = 'http://192.168.0.30:3000';
+                    _testConnection(l10n);
+                  },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.public_rounded, size: 15),
+                  label: const Text('Alt (176.28.134.53)', style: TextStyle(fontSize: 11.5)),
                   onPressed: () {
                     _ctrl.text = 'http://176.28.134.53:3000';
                     _testConnection(l10n);
@@ -119,14 +135,6 @@ class _ServerUrlDialogState extends ConsumerState<ServerUrlDialog> {
                   label: const Text('Legacy (46.185.128.165)', style: TextStyle(fontSize: 11.5)),
                   onPressed: () {
                     _ctrl.text = 'http://46.185.128.165:3000';
-                    _testConnection(l10n);
-                  },
-                ),
-                ActionChip(
-                  avatar: const Icon(Icons.lan_rounded, size: 15),
-                  label: const Text('Company LAN (192.168.0.30)', style: TextStyle(fontSize: 11.5)),
-                  onPressed: () {
-                    _ctrl.text = 'http://192.168.0.30:3000';
                     _testConnection(l10n);
                   },
                 ),
