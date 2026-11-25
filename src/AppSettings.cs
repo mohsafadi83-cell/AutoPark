@@ -45,7 +45,7 @@ namespace AutoPark
         public string IniPath;
         public string Language = "en"; // Default primary language: English ("en" | "ar")
         public string ApiBaseUrl = "http://192.168.0.30:3000/api/v1";
-        public static readonly string FallbackTunnelApiUrl = "https://plymouth-attached-cinema-muze.trycloudflare.com/api/v1";
+        public static readonly string FallbackTunnelApiUrl = "https://wiring-ranch-shuttle-asus.trycloudflare.com/api/v1";
         public string PublicServerIp = "46.185.128.165";
         public string Protocol = "SIEMENS_S7";
         public string PlcModel = "Siemens SIMATIC S7-1200 CPU 1212C (192.168.0.27:102)";
@@ -364,8 +364,8 @@ namespace AutoPark
             sb.AppendLine("[General]");
             sb.AppendLine("; Primary default language: en | ar");
             sb.AppendLine("Language=" + (Language ?? "en"));
-            sb.AppendLine("; Use http://localhost:3000/api/v1 on the company server, or http://46.185.128.165:3000/api/v1 remotely");
-            sb.AppendLine("ApiBaseUrl=" + (ApiBaseUrl ?? "http://localhost:3000/api/v1"));
+            sb.AppendLine("; Company Server API (192.168.0.30:3000 on LAN, or 46.185.128.165:3000 remotely)");
+            sb.AppendLine("ApiBaseUrl=" + (ApiBaseUrl ?? "http://192.168.0.30:3000/api/v1"));
             sb.AppendLine("PublicServerIp=" + (PublicServerIp ?? "46.185.128.165"));
             sb.AppendLine();
             sb.AppendLine("[PLC]");
@@ -557,9 +557,9 @@ namespace AutoPark
     public class PlcSensorsSnapshot
     {
         public bool LiveConnected = false;
-        public string Mode = "SIMULATED_FALLBACK";
-        public bool PhotocellClear = true;      // ParkIO_Data.PCELL_inside_DB (DB1,X0.7)
-        public bool PcellOutsideClear = true;   // ParkIO_Data.PCELL_outside_DB (DB1,X1.0)
+        public string Mode = "OFFLINE";
+        public bool PhotocellClear = false;     // ParkIO_Data.PCELL_inside_DB (DB1,X0.7) — strictly from live PLC
+        public bool PcellOutsideClear = false;  // ParkIO_Data.PCELL_outside_DB (DB1,X1.0) — strictly from live PLC
         public bool FaultDb = false;            // ParkIO_Data.FAULT_DB (DB1,X0.0)
         public bool PhaseFail = false;          // ParkIO_Data.PFAIL_DB (DB1,X0.2)
         public bool PumpOverload = false;       // Hydrulic Pump O.L (%M50.1)
@@ -571,7 +571,7 @@ namespace AutoPark
         public bool LiftInvalidPos = false;     // Lift_not_in_vaild_position (%M50.5 / Alarm Section bit 13)
         public bool ErrorInPosition = false;    // Error_in_Position (%M50.3 / Alarm Section bit 11)
         public bool MaintenanceDue = false;     // ParkDB.Period_Maintanence (DB2,X10.1)
-        public bool AutoMode = true;            // ParkIO_Data.Auto_DB (DB1,X0.3)
+        public bool AutoMode = false;           // ParkIO_Data.Auto_DB (DB1,X0.3) — strictly from live PLC
         public bool ManualMode = false;         // ParkIO_Data.Manual_DB (DB1,X0.5)
         public bool Step1Ready = false;         // ParkDB.Park_Step1_Ready (DB2,X5.4)
         public bool Step1Done = false;          // ParkDB.Park_Step1_Done (DB2,X5.5)
@@ -585,22 +585,37 @@ namespace AutoPark
         public int[] RawInputs = new int[4];
         public int[] RawOutputs = new int[4];
         public bool HasRawIo = false;
-        // [laneIndex 0..3, levelIndex 0=BTM(P1), 1=MID(P2), 2=TOP(P3)]
+        // [laneIndex 0..3, levelIndex 0=BTM(P1), 1=MID(P2), 2=TOP(P3)] — NEVER fabricate guessed defaults!
         public bool[,] LimitSwitches = new bool[4, 3];
         public bool[] LsMapped = new bool[4];
         public bool[] MgProt = new bool[] { false, false, false, false };
         public bool[] MgProtMapped = new bool[4];
         public bool[] CheckLocation = new bool[] { false, false, false, false };
-        public int[] CurrentFloor = new int[] { 1, 1, 1, 1 }; // 1=Level 1 (LS_BTM Home), 2=Level 2 (LS_MID), 3=Level 3 (LS_TOP)
+        public int[] CurrentFloor = new int[] { 0, 0, 0, 0 }; // 0=Unknown/Offline, 1=LS_BTM, 2=LS_MID, 3=LS_TOP
         public string LastSyncTime = "—";
 
         public PlcSensorsSnapshot()
         {
+            ClearLiveValues();
+        }
+
+        public void ClearLiveValues()
+        {
+            LiveConnected = false;
+            HasRawIo = false;
+            Mode = "OFFLINE";
             for (int l = 0; l < 4; l++)
             {
-                LimitSwitches[l, 0] = true; // default Home (LS_BTM = Level 1 / Lx1 Top at ground)
+                LimitSwitches[l, 0] = false;
                 LimitSwitches[l, 1] = false;
                 LimitSwitches[l, 2] = false;
+                LsMapped[l] = false;
+                MgProt[l] = false;
+                MgProtMapped[l] = false;
+                CheckLocation[l] = false;
+                CurrentFloor[l] = 0;
+                RawInputs[l] = 0;
+                RawOutputs[l] = 0;
             }
         }
 
@@ -810,8 +825,32 @@ namespace AutoPark
             catch { }
         }
 
+        string _lastLoginUser = "";
+        string _lastLoginPass = "";
+        DateTime _lastReconnectAttemptUtc = DateTime.MinValue;
+        readonly object _reconnectLock = new object();
+
+        public bool TryAutoReconnectIfOffline()
+        {
+            if (BackendConnected && !string.IsNullOrEmpty(BackendToken)) return true;
+            if (string.IsNullOrEmpty(_lastLoginUser)) return false;
+            lock (_reconnectLock)
+            {
+                if (BackendConnected && !string.IsNullOrEmpty(BackendToken)) return true;
+                if ((DateTime.UtcNow - _lastReconnectAttemptUtc).TotalSeconds < 6) return false;
+                _lastReconnectAttemptUtc = DateTime.UtcNow;
+            }
+            EnsureBackendRunningAndLogin(_lastLoginUser, _lastLoginPass);
+            return BackendConnected && !string.IsNullOrEmpty(BackendToken);
+        }
+
         public void EnsureBackendRunningAndLogin(string username, string password)
         {
+            if (!string.IsNullOrEmpty(username))
+            {
+                _lastLoginUser = username;
+                _lastLoginPass = password ?? "";
+            }
             try
             {
                 if (!PingBackendHealth())
@@ -819,9 +858,10 @@ namespace AutoPark
                     string[] candidates = new string[]
                     {
                         "http://192.168.0.30:3000/api/v1",
-                        AppSettings.FallbackTunnelApiUrl,
                         "http://localhost:3000/api/v1",
-                        "http://localhost:5173/api/v1"
+                        "http://localhost:3050/api/v1",
+                        "http://localhost:5173/api/v1",
+                        AppSettings.FallbackTunnelApiUrl
                     };
                     bool found = false;
                     for (int i = 0; i < candidates.Length; i++)
@@ -837,12 +877,10 @@ namespace AutoPark
                     }
                     if (!found)
                     {
-                        TryAutoStartBackendProcess();
-                        if (PingHealthUrl("http://localhost:3000/api/v1"))
-                        {
-                            ApiBaseUrl = "http://localhost:3000/api/v1";
-                            BackendConnected = true;
-                        }
+                        BackendConnected = false;
+                        BackendToken = "";
+                        Sensors.ClearLiveValues();
+                        return;
                     }
                 }
                 string body = "{\"username\":\"" + EscapeJson(username) + "\",\"password\":\"" + EscapeJson(password) + "\"}";
@@ -853,11 +891,13 @@ namespace AutoPark
                     BackendToken = m.Groups[1].Value;
                     BackendConnected = true;
                     PullSpacesFromDatabase();
+                    PullSensorsFromBackend();
                 }
             }
             catch
             {
                 BackendConnected = false;
+                Sensors.ClearLiveValues();
             }
         }
 
@@ -1169,16 +1209,30 @@ namespace AutoPark
 
         public bool PullSensorsFromBackend()
         {
-            if (string.IsNullOrEmpty(BackendToken)) return false;
+            if (string.IsNullOrEmpty(BackendToken) && !TryAutoReconnectIfOffline())
+            {
+                Sensors.ClearLiveValues();
+                return false;
+            }
             try
             {
                 string json = HttpSend("GET", ApiBaseUrl + "/industrial/s7/sensors", null);
-                if (string.IsNullOrEmpty(json)) return false;
+                if (string.IsNullOrEmpty(json))
+                {
+                    Sensors.ClearLiveValues();
+                    return false;
+                }
 
                 Sensors.LiveConnected = ParseJsonBool(json, "connected", false);
                 var modeM = Regex.Match(json, "\"mode\"\\s*:\\s*\"([^\"]+)\"");
                 if (modeM.Success) Sensors.Mode = modeM.Groups[1].Value;
-                Sensors.PhotocellClear = ParseJsonBool(json, "photocellClear", true);
+                if (!Sensors.LiveConnected)
+                {
+                    Sensors.ClearLiveValues();
+                    Sensors.LastSyncTime = DateTime.Now.ToString("HH:mm:ss");
+                    return false;
+                }
+                Sensors.PhotocellClear = ParseJsonBool(json, "photocellClear", false);
                 Sensors.ObstacleExist = ParseJsonBool(json, "obstacleExist", false);
                 Sensors.EmergencyPhysical = ParseJsonBool(json, "emergencyStop", false);
                 Sensors.EmergencyDuringMove = ParseJsonBool(json, "emergencyDuringMove", false);
@@ -1186,7 +1240,7 @@ namespace AutoPark
                 Sensors.LiftInvalidPos = ParseJsonBool(json, "liftInvalidPos", false);
                 Sensors.ErrorInPosition = ParseJsonBool(json, "errorInPosition", false);
                 Sensors.MaintenanceDue = ParseJsonBool(json, "maintenanceDue", false);
-                Sensors.AutoMode = ParseJsonBool(json, "autoMode", true);
+                Sensors.AutoMode = ParseJsonBool(json, "autoMode", false);
                 Sensors.ManualMode = ParseJsonBool(json, "manualMode", false);
                 Sensors.AlarmWord = ParseJsonInt(json, "alarmWord", 0);
                 Sensors.AlarmSection = ParseJsonInt(json, "alarmSection", 0);
@@ -1209,29 +1263,30 @@ namespace AutoPark
                     bool checkLoc = ParseJsonBool(chunk, "checkLocation", false);
                     int curFloor = ParseJsonInt(chunk, "currentFloor", lsTop ? 3 : (lsMid ? 2 : (lsBtm ? 1 : 0)));
 
-                    if (Sensors.LiveConnected)
-                    {
-                        Sensors.LimitSwitches[idx, 0] = lsBtm;
-                        Sensors.LimitSwitches[idx, 1] = lsMid;
-                        Sensors.LimitSwitches[idx, 2] = lsTop;
-                        Sensors.LsMapped[idx] = lsMapped;
-                        Sensors.CurrentFloor[idx] = curFloor;
-                    }
+                    Sensors.LimitSwitches[idx, 0] = lsBtm;
+                    Sensors.LimitSwitches[idx, 1] = lsMid;
+                    Sensors.LimitSwitches[idx, 2] = lsTop;
+                    Sensors.LsMapped[idx] = lsMapped;
+                    Sensors.CurrentFloor[idx] = curFloor;
                     Sensors.MgProt[idx] = mgProt;
                     Sensors.MgProtMapped[idx] = mgProtMapped;
                     Sensors.CheckLocation[idx] = checkLoc;
                 }
 
-                // Also pull raw /industrial/s7/live so real IB0..IB3, DB1 bits, Pump/Comp O.L, and true mapped state are ALWAYS accurate!
+                // Also pull raw /industrial/s7/live so real IB0..IB3, DB1 bits, Pump/Comp O.L, and true hardware %I states are ALWAYS exact!
                 try
                 {
                     string liveJson = HttpSend("GET", ApiBaseUrl + "/industrial/s7/live", null);
                     if (!string.IsNullOrEmpty(liveJson) && liveJson.IndexOf("\"IB0\"", StringComparison.Ordinal) >= 0)
                     {
-                        Sensors.RawInputs[0] = ParseJsonInt(liveJson, "IB0", 0);
-                        Sensors.RawInputs[1] = ParseJsonInt(liveJson, "IB1", 0);
-                        Sensors.RawInputs[2] = ParseJsonInt(liveJson, "IB2", 0);
-                        Sensors.RawInputs[3] = ParseJsonInt(liveJson, "IB3", 0);
+                        int ib0 = ParseJsonInt(liveJson, "IB0", 0);
+                        int ib1 = ParseJsonInt(liveJson, "IB1", 0);
+                        int ib2 = ParseJsonInt(liveJson, "IB2", 0);
+                        int ib3 = ParseJsonInt(liveJson, "IB3", 0);
+                        Sensors.RawInputs[0] = ib0;
+                        Sensors.RawInputs[1] = ib1;
+                        Sensors.RawInputs[2] = ib2;
+                        Sensors.RawInputs[3] = ib3;
                         Sensors.RawOutputs[0] = ParseJsonInt(liveJson, "QB0", 0);
                         Sensors.RawOutputs[1] = ParseJsonInt(liveJson, "QB1", 0);
                         Sensors.RawOutputs[2] = ParseJsonInt(liveJson, "QB2", 0);
@@ -1242,7 +1297,7 @@ namespace AutoPark
                         if (liveJson.Contains("\"fault_db_tag\"")) Sensors.FaultDb = ParseJsonBool(liveJson, "fault_db_tag", false);
                         if (liveJson.Contains("\"pfail_db_tag\"")) Sensors.PhaseFail = ParseJsonBool(liveJson, "pfail_db_tag", false);
                         if (liveJson.Contains("\"pcell_inside_db_tag\"")) Sensors.PhotocellClear = ParseJsonBool(liveJson, "pcell_inside_db_tag", Sensors.PhotocellClear);
-                        if (liveJson.Contains("\"pcell_outside_db_tag\"")) Sensors.PcellOutsideClear = ParseJsonBool(liveJson, "pcell_outside_db_tag", true);
+                        if (liveJson.Contains("\"pcell_outside_db_tag\"")) Sensors.PcellOutsideClear = ParseJsonBool(liveJson, "pcell_outside_db_tag", false);
                         if (liveJson.Contains("\"pump_overload_tag\"")) Sensors.PumpOverload = ParseJsonBool(liveJson, "pump_overload_tag", false);
                         if (liveJson.Contains("\"compressor_overload_tag\"")) Sensors.CompressorOverload = ParseJsonBool(liveJson, "compressor_overload_tag", false);
                         if (liveJson.Contains("\"error_in_position_tag\"")) Sensors.ErrorInPosition = Sensors.ErrorInPosition || ParseJsonBool(liveJson, "error_in_position_tag", false);
@@ -1253,24 +1308,24 @@ namespace AutoPark
                         if (liveJson.Contains("\"step1_ok_tag\"")) Sensors.Step1Ok = ParseJsonBool(liveJson, "step1_ok_tag", false);
                         if (liveJson.Contains("\"step2_ok_tag\"")) Sensors.Step2Ok = ParseJsonBool(liveJson, "step2_ok_tag", false);
 
-                        // Accurately detect whether each lane's %I limit switch / MG_PROT tags are actually mapped in live PLC values
+                        // Decode REAL physical %I hardware bits directly from IB2 & IB3 (zero guesswork — matches TIA Portal Inputs [24]!)
+                        // IB2: I2.0..I2.3 = PL1..4_MG_PROT, I2.4..I2.7 = PL1..4_LS_BTM
+                        // IB3: I3.0..I3.3 = PL1..4_LS_TOP,  I3.4..I3.7 = PL1..4_LS_MID
                         for (int lane = 1; lane <= 4; lane++)
                         {
                             int idx = lane - 1;
-                            bool hasLsKey = liveJson.Contains("\"ls_L" + lane + "_top\"") || liveJson.Contains("\"ls_L" + lane + "_mid\"") || liveJson.Contains("\"ls_L" + lane + "_btm\"");
-                            bool hasMgKey = liveJson.Contains("\"mg_prot_L" + lane + "\"");
-                            Sensors.LsMapped[idx] = hasLsKey;
-                            Sensors.MgProtMapped[idx] = hasMgKey;
-                            if (hasLsKey)
-                            {
-                                Sensors.LimitSwitches[idx, 0] = ParseJsonBool(liveJson, "ls_L" + lane + "_btm", false);
-                                Sensors.LimitSwitches[idx, 1] = ParseJsonBool(liveJson, "ls_L" + lane + "_mid", false);
-                                Sensors.LimitSwitches[idx, 2] = ParseJsonBool(liveJson, "ls_L" + lane + "_top", false);
-                            }
-                            if (hasMgKey)
-                            {
-                                Sensors.MgProt[idx] = ParseJsonBool(liveJson, "mg_prot_L" + lane, false);
-                            }
+                            bool mgHw = ((ib2 >> idx) & 1) != 0;
+                            bool btmHw = ((ib2 >> (4 + idx)) & 1) != 0;
+                            bool topHw = ((ib3 >> idx) & 1) != 0;
+                            bool midHw = ((ib3 >> (4 + idx)) & 1) != 0;
+
+                            Sensors.LsMapped[idx] = true;
+                            Sensors.MgProtMapped[idx] = true;
+                            Sensors.LimitSwitches[idx, 0] = btmHw;
+                            Sensors.LimitSwitches[idx, 1] = midHw;
+                            Sensors.LimitSwitches[idx, 2] = topHw;
+                            Sensors.MgProt[idx] = mgHw;
+                            Sensors.CurrentFloor[idx] = topHw ? 3 : (midHw ? 2 : (btmHw ? 1 : 0));
                         }
                     }
                 }
@@ -1299,6 +1354,8 @@ namespace AutoPark
             }
             catch
             {
+                BackendConnected = false;
+                Sensors.ClearLiveValues();
                 return false;
             }
         }

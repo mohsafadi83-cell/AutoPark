@@ -232,17 +232,20 @@ namespace AutoPark
             Controls.Add(kpiStrip);
             Controls.Add(topBar);
 
-            // Continuous 15-second auto-refresh
+            // Continuous 15-second auto-refresh (with automatic backend reconnection if server restarts)
             _autoRefreshTimer = new Timer { Interval = 15000 };
             _autoRefreshTimer.Tick += delegate
             {
                 if (IsDisposed || !Visible) return;
                 System.Threading.ThreadPool.QueueUserWorkItem(delegate
                 {
-                    if (ParkState.Instance.BackendConnected)
+                    var st = ParkState.Instance;
+                    if (!st.BackendConnected || string.IsNullOrEmpty(st.BackendToken))
+                        st.TryAutoReconnectIfOffline();
+                    if (st.BackendConnected && !string.IsNullOrEmpty(st.BackendToken))
                     {
-                        ParkState.Instance.PullSpacesFromDatabase();
-                        ParkState.Instance.PullSensorsFromBackend();
+                        st.PullSpacesFromDatabase();
+                        st.PullSensorsFromBackend();
                     }
                     if (!IsDisposed && IsHandleCreated)
                     {
@@ -410,9 +413,11 @@ namespace AutoPark
                 };
 
                 int curF = sensors.CurrentFloor[lane - 1];
-                string floorBadge = curF == 3 ? "P3 (TOP)" : (curF == 2 ? "P2 (MID)" : (curF == 1 ? "P1 (BTM)" : Loc.T("Moving", "متحرك")));
-                bool mgTripped = sensors.MgProtMapped[lane - 1] && sensors.MgProt[lane - 1];
-                string mgIcon = mgTripped ? "🔴" : "🟢";
+                string floorBadge = !sensors.LiveConnected
+                    ? Loc.T("Offline", "غير متصل")
+                    : (curF == 3 ? "P3 (TOP)" : (curF == 2 ? "P2 (MID)" : (curF == 1 ? "P1 (BTM)" : Loc.T("Off-LS / Between", "خارج الحساس"))));
+                bool mgTripped = sensors.LiveConnected && sensors.MgProtMapped[lane - 1] && sensors.MgProt[lane - 1];
+                string mgIcon = !sensors.LiveConnected ? "⚫" : (mgTripped ? "🔴" : "🟢");
                 var towerHeader = Theme.Label(
                     Loc.T("Lane " + lane + "  |  Lift: " + floorBadge + " " + mgIcon,
                           "المسار " + lane + " (Lane " + lane + ")  |  المصعد: " + floorBadge + " " + mgIcon),
@@ -562,12 +567,16 @@ namespace AutoPark
         void OpenOperationDialog(string opType, SpaceItem targetSpace)
         {
             var st = ParkState.Instance;
-            if (st.ControllerOffline || st.EmergencyStop || _shell.Settings.ReadOnlyMode)
+            bool livePlcRequired = !string.Equals(_shell.Settings.Protocol, "MOCK", StringComparison.OrdinalIgnoreCase);
+            bool plcLinkLost = livePlcRequired && (!st.BackendConnected || !st.Sensors.LiveConnected);
+            if (st.ControllerOffline || plcLinkLost || st.EmergencyStop || _shell.Settings.ReadOnlyMode)
             {
                 string reasonEn = st.ControllerOffline ? "Industrial controller is offline."
+                    : plcLinkLost ? "No live connection to AutoPark Backend / S7-1200 PLC (" + st.ApiBaseUrl + "). Start the Live Server on 192.168.0.30:3000 first."
                     : st.EmergencyStop ? "Emergency Stop is active!"
                     : "System is in Read-Only monitoring mode.";
                 string reasonAr = st.ControllerOffline ? "المتحكم الصناعي غير متصل (Offline)."
+                    : plcLinkLost ? "لا يوجد اتصال حي بالسيرفر / PLC S7-1200 (" + st.ApiBaseUrl + "). يجب تشغيل السيرفر على 192.168.0.30:3000 بالوضع الحي (LIVE) أولاً."
                     : st.EmergencyStop ? "إيقاف الطوارئ (Emergency Stop) مفعّل حالياً!"
                     : "النظام في وضع المراقبة فقط (Read-Only).";
                 Loc.ShowMsg(

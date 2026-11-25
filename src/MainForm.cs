@@ -194,18 +194,21 @@ namespace AutoPark
             var dbSyncTimer = new Timer { Interval = 4000 };
             dbSyncTimer.Tick += delegate
             {
-                if (ParkState.Instance.BackendConnected)
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate
                 {
-                    System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                    var st = ParkState.Instance;
+                    if (!st.BackendConnected || string.IsNullOrEmpty(st.BackendToken))
+                        st.TryAutoReconnectIfOffline();
+                    if (st.BackendConnected && !string.IsNullOrEmpty(st.BackendToken))
                     {
-                        ParkState.Instance.PullSpacesFromDatabase();
-                        ParkState.Instance.PullSensorsFromBackend();
-                        if (!IsDisposed && IsHandleCreated)
-                        {
-                            try { BeginInvoke((Action)UpdateFooterStatus); } catch { }
-                        }
-                    });
-                }
+                        st.PullSpacesFromDatabase();
+                        st.PullSensorsFromBackend();
+                    }
+                    if (!IsDisposed && IsHandleCreated)
+                    {
+                        try { BeginInvoke((Action)UpdateFooterStatus); } catch { }
+                    }
+                });
             };
             dbSyncTimer.Start();
 

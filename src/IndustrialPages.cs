@@ -455,11 +455,40 @@ namespace AutoPark
             _lblModeBanner.Text = s.LiveConnected
                 ? Loc.T("🟢 Live PLC S7-1200 Connection (Last Sync: " + s.LastSyncTime + ")",
                         "🟢 اتصال مباشر مع PLC S7-1200 (تحديث حي — آخر قراءة: " + s.LastSyncTime + ")")
-                : Loc.T("🟡 Simulation / Waiting for PLC (Last Sync: " + s.LastSyncTime + ")",
-                        "🟡 وضع المحاكاة / انتظار اتصال الـ PLC (آخر تحديث: " + s.LastSyncTime + ")");
-            _lblModeBanner.ForeColor = s.LiveConnected ? Theme.Ok : Theme.Amber;
+                : Loc.T("🔴 PLC / Server OFFLINE — No Live Sensor Readings (Server: " + st.ApiBaseUrl + ")",
+                        "🔴 السيرفر / PLC غير متصل — لا توجد قراءات حساسات حية (السيرفر: " + st.ApiBaseUrl + ")");
+            _lblModeBanner.ForeColor = s.LiveConnected ? Theme.Ok : Theme.Err;
 
-            _maintPanel.Visible = s.MaintenanceDue;
+            _maintPanel.Visible = s.LiveConnected && s.MaintenanceDue;
+
+            if (!s.LiveConnected)
+            {
+                string offTxt = Loc.T("⚫ Offline (No PLC)", "⚫ غير متصل بالـ PLC");
+                _lblPhotocell.Text = offTxt; _lblPhotocell.ForeColor = Theme.Muted;
+                _lblPhotocellOut.Text = offTxt; _lblPhotocellOut.ForeColor = Theme.Muted;
+                _lblEmergency.Text = offTxt; _lblEmergency.ForeColor = Theme.Muted;
+                _lblFaultPhase.Text = offTxt; _lblFaultPhase.ForeColor = Theme.Muted;
+                _lblOverload.Text = offTxt; _lblOverload.ForeColor = Theme.Muted;
+                _lblObstacle.Text = offTxt; _lblObstacle.ForeColor = Theme.Muted;
+                _lblStopper.Text = offTxt; _lblStopper.ForeColor = Theme.Muted;
+                _lblLiftPos.Text = offTxt; _lblLiftPos.ForeColor = Theme.Muted;
+                _lblRawIoLine.Text = Loc.T("Live Physical PLC Digital Inputs (I0.0–I3.7) — OFFLINE (No Live Data from PLC)",
+                                           "مداخل الحساسات الفيزيائية الحية من الـ PLC (I0.0–I3.7) — غير متصل (لا توجد قراءات حية)");
+                for (int i = 0; i < _rawInLeds.Length; i++)
+                {
+                    _rawInLeds[i].BackColor = Theme.Back;
+                    _rawInLeds[i].ForeColor = Theme.Muted;
+                }
+                for (int lane = 0; lane < 4; lane++)
+                {
+                    for (int lv = 0; lv < 3; lv++) { _lsCells[lane, lv].SetGreen(false); _lsCells[lane, lv].BackColor = Color.FromArgb(248, 250, 252); }
+                    _mgCells[lane].SetRed(false); _mgCells[lane].BackColor = Color.FromArgb(248, 250, 252);
+                    _locCells[lane].SetGreen(false); _locCells[lane].BackColor = Color.FromArgb(248, 250, 252);
+                }
+                _lblAlarmRegs.Text = Loc.T("PLC Registers — OFFLINE (Start AutoPark Live Server on 192.168.0.30:3000)",
+                                           "سجلات الـ PLC — غير متصل (يرجى تشغيل سيرفر AutoPark الحي على 192.168.0.30:3000)");
+                return;
+            }
 
             _lblPhotocell.Text = s.PhotocellClear ? Loc.T("🟢 Clear (1)", "🟢 فارغ (1)") : Loc.T("🔴 Blocked (0)!", "🔴 مقطوع (0)!");
             _lblPhotocell.ForeColor = s.PhotocellClear ? Theme.Ok : Theme.Err;
