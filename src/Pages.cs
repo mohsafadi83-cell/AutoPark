@@ -1189,9 +1189,8 @@ namespace AutoPark
                             finally { _sensorPollInFlight = false; }
                         });
                     }
-                    // STRICT physical limit switch check with real wall-clock elapsed seconds (30s compact window)
+                    // Pure sensor-driven motion tracking: wait for real physical floor limit switch (NO artificial timeout!)
                     bool lsReached = st.Sensors.LimitSwitches[lane - 1, stepCode - 1];
-                    bool reached = lsReached;
                     if (_waitStartUtc == DateTime.MinValue)
                     {
                         _waitStartUtc = DateTime.UtcNow;
@@ -1199,58 +1198,16 @@ namespace AutoPark
                     }
                     int elapsedSec = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - _waitStartUtc).TotalSeconds - _pausedTotalSec));
 
-                    if (!reached && elapsedSec < 30)
+                    if (!lsReached)
                     {
                         _waitTicks = elapsedSec;
                         _lblElevatorPos.ForeColor = Theme.Amber;
+                        int curF = st.Sensors.CurrentFloor[lane - 1];
+                        string curTxt = curF >= 1 && curF <= 3 ? ("P" + curF) : Loc.T("Moving", "متحرك");
                         string lsName = "PL" + lane + "_LS_" + (stepCode == 3 ? "TOP" : (stepCode == 2 ? "MID" : "BTM"));
                         _lblElevatorPos.Text = Loc.T(
-                            "⏳ Lifting to Floor P" + stepCode + " — waiting for PLC sensor " + lsName + " (" + elapsedSec + "/30s)...",
-                            "⏳ جاري تحريك المصعد للطابق P" + stepCode + " — بانتظار الحساس الفعلي " + lsName + " (" + elapsedSec + "/30 ث)...");
-                        return;
-                    }
-                    if (!reached)
-                    {
-                        bool isSafe = !st.EmergencyStop && !st.Sensors.EmergencyPhysical && !st.Sensors.ObstacleExist && st.Sensors.AlarmWord == 0;
-                        if (isSafe)
-                        {
-                            // Safe sensor-stuck auto-recovery: Safe PLC Reset (DB2,X10.0 + M0.5) & fresh sensor sync, never freeze UI
-                            _timer.Stop();
-                            _lblElevatorPos.ForeColor = Theme.Amber;
-                            _lblElevatorPos.Text = Loc.T(
-                                "🔄 Sensor delay detected in safe state — running Safe PLC Reset & sensor refresh...",
-                                "🔄 تأخر في أحد الحساسات والوضع آمن — جاري عمل تحديث وإعادة ضبط آمنة للـ PLC...");
-                            _lblStepStatus.ForeColor = Theme.Amber;
-                            _lblStepStatus.Text = Loc.T(
-                                "✅ Safe Reset & sensor refresh sent. Verify lift position and click Confirm to continue if needed.",
-                                "✅ تم إرسال إعادة الضبط الآمنة وتحديث الحساسات. يمكنك المتابعة أو إعادة المحاولة بأمان.");
-                            _btnCancelStep.Enabled = false;
-                            _btnExecute.Enabled = true;
-                            _cmbVehicle.Enabled = true;
-                            _txtPlate.Enabled = true;
-                            _activeCmd.Status = "RECOVERED";
-                            _activeCmd.CompletedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-                            System.Threading.ThreadPool.QueueUserWorkItem(delegate
-                            {
-                                st.SendPlcWriteBool("DB2,X10.0", true, 400); // ParkDB.Reset safe pulse
-                                st.SendPlcWriteBool("M0.5", true, 400);      // %M0.5 Reset safe pulse
-                                System.Threading.Thread.Sleep(500);
-                                st.PullSensorsFromBackend();
-                            });
-                            st.NotifyChanged();
-                            return;
-                        }
-
-                        _timer.Stop();
-                        st.EnsureAlarmActive("POSITION_TIMEOUT", "CRITICAL", "POSITION_TIMEOUT on Lane " + lane + " Floor P" + stepCode, "CLOSED_LOOP_MONITOR");
-                        _activeCmd.Status = "FAILED";
-                        _lblStepStatus.ForeColor = Theme.Err;
-                        _lblStepStatus.Text = Loc.T("🔴 POSITION_TIMEOUT: Floor P" + stepCode + " limit switch did not trigger!", "🔴 خطأ POSITION_TIMEOUT: لم يتفعّل حساس الطابق P" + stepCode + " ضمن المهلة الآمنة!");
-                        _btnCancelStep.Enabled = false;
-                        _btnExecute.Enabled = true;
-                        _cmbVehicle.Enabled = true;
-                        _txtPlate.Enabled = true;
-                        st.NotifyChanged();
+                            "🔄 Live Motion (Lane " + lane + "): " + curTxt + " → P" + stepCode + " | Waiting for " + lsName + "=ON (" + elapsedSec + "s)",
+                            "🔄 حركة المصعد الحية (المسار " + lane + "): " + curTxt + " ← P" + stepCode + " | بانتظار الحساس " + lsName + "=ON (" + elapsedSec + " ث)");
                         return;
                     }
                     else
