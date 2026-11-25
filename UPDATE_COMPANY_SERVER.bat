@@ -36,6 +36,18 @@ if exist "%~dp0.git" (
 )
 
 echo.
+echo [1.5/5] Ensuring LIVE Production Mode (APP_MODE=LIVE, INDUSTRIAL_WRITE_ENABLED=true) in backend\.env...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$envFile = Join-Path '%~dp0backend' '.env';" ^
+  "if (Test-Path $envFile) {" ^
+  "  $c = Get-Content $envFile -Raw;" ^
+  "  if ($c -match '(?m)^APP_MODE=') { $c = $c -replace '(?m)^APP_MODE=.*$', 'APP_MODE=LIVE' } else { $c = \"APP_MODE=LIVE`r`n\" + $c };" ^
+  "  if ($c -match '(?m)^INDUSTRIAL_WRITE_ENABLED=') { $c = $c -replace '(?m)^INDUSTRIAL_WRITE_ENABLED=.*$', 'INDUSTRIAL_WRITE_ENABLED=true' } else { $c = $c + \"`r`nINDUSTRIAL_WRITE_ENABLED=true`r`n\" };" ^
+  "  Set-Content -Path $envFile -Value $c -NoNewline;" ^
+  "  Write-Host 'LIVE Mode enforced in backend\.env (APP_MODE=LIVE, INDUSTRIAL_WRITE_ENABLED=true)!' -ForegroundColor Green" ^
+  "}"
+
+echo.
 echo [2/5] Building NestJS Backend (PLC Fixes + DB Caching + Direct Bay Move)...
 cd /d "%~dp0backend"
 call npm run build

@@ -119,7 +119,7 @@ class _ManualPlcControlScreenState
     );
     if (_manualEnabled) {
       unawaited(
-        notifier.sendManualControl('man_mode_tag', false).catchError((_) => const <String, dynamic>{}),
+        notifier.sendManualControl('manual_mode_tag', false).catchError((_) => const <String, dynamic>{}),
       );
     }
   }
@@ -185,8 +185,8 @@ class _ManualPlcControlScreenState
           ),
           content: Text(
             isAr
-                ? 'سيتم تحويل لوحة الـ PLC إلى الوضع اليدوي (man_mode_tag = ON) لتشغيل المضخة والمصعد والصمامات والمسارات مباشرة.\n\nتأكد من خلو الموقف والمصاعد قبل المتابعة.'
-                : 'This switches the PLC into Manual Maintenance Mode (man_mode_tag = ON) for direct pump, lift, valve, stopper, and lane control.\n\nVerify all bays and lifts are clear before proceeding.',
+                ? 'سيتم تحويل لوحة الـ PLC إلى الوضع اليدوي (manual_mode_tag = ON) لتشغيل المضخة والمصعد والصمامات والمسارات مباشرة.\n\nتأكد من خلو الموقف والمصاعد قبل المتابعة.'
+                : 'This switches the PLC into Manual Maintenance Mode (manual_mode_tag = ON) for direct pump, lift, valve, stopper, and lane control.\n\nVerify all bays and lifts are clear before proceeding.',
           ),
           actions: [
             TextButton(
@@ -221,7 +221,7 @@ class _ManualPlcControlScreenState
           reasonAr: 'العودة للوضع التلقائي — تم إيقاف جميع المخارج',
         );
       }
-      await notifier.sendManualControl('man_mode_tag', enable);
+      await notifier.sendManualControl('manual_mode_tag', enable);
       HapticFeedback.mediumImpact();
       if (!mounted) return;
       setState(() {
