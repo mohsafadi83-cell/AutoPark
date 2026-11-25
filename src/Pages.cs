@@ -80,7 +80,9 @@ namespace AutoPark
                 }
             };
 
-            bool isRestrictedEmployee = shell.CurrentUser.Role == "EMPLOYEE" || shell.CurrentUser.Role == "PARKING_ATTENDANT";
+            bool isRestrictedEmployee = shell.CurrentUser.Role == "EMPLOYEE"
+                || shell.CurrentUser.Role == "PARKING_ATTENDANT"
+                || string.Equals(shell.CurrentUser.Username, "attendant", StringComparison.OrdinalIgnoreCase);
 
             var btnSystemCheck = MakeActionBtn(Loc.T("System Check", "فحص النظام"), Icons.Check, Theme.PrimarySoft, Theme.BlueSoft, 122, true);
             btnSystemCheck.Click += delegate { shell.Navigate(new SystemCheckPage(shell), Loc.T("Full System Check — All Sensors & Machine Features", "الفحص الشامل للنظام — جميع الحساسات وميزات البرنامج والماكنة")); };
@@ -121,13 +123,13 @@ namespace AutoPark
                 navFlow.Controls.Add(b);
             };
 
-            addNav(btnPark, 118);
-            addNav(btnRetrieve, 116);
-            addNav(btnSystemCheck, 122);
-            addNav(btnClassicSim, 132);
-            addNav(btnVnc, 108);
             if (!isRestrictedEmployee)
             {
+                addNav(btnPark, 118);
+                addNav(btnRetrieve, 116);
+                addNav(btnSystemCheck, 122);
+                addNav(btnClassicSim, 132);
+                addNav(btnVnc, 108);
                 addNav(btnManual, 142);
                 addNav(btnAlarms, 94);
                 addNav(btnHistory, 96);
