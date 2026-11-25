@@ -115,13 +115,57 @@ export class SiemensS7Adapter implements IndustrialController {
   private translationMap: Record<string, string> = {};
   private writeChain: Promise<void> = Promise.resolve();
   private commandChain: Promise<unknown> = Promise.resolve();
+  private pendingCommands = 0;
+  private lastCommandSig = '';
+  private lastCommandAt = 0;
+  private static readonly MAX_PENDING_COMMANDS = 12;
+  private static readonly DUPLICATE_WINDOW_MS = 250;
 
   /**
-   * Strict FIFO sequential command queue so the S7-1200 PLC only ever executes
-   * ONE high-level command at a time (prevents concurrent write collisions / PLC hangs).
+   * Strict FIFO sequential command pipeline with congestion & loop protection:
+   * - Executes strictly ONE high-level PLC command at a time (zero overlap).
+   * - Rejects non-priority commands when queue depth exceeds MAX_PENDING_COMMANDS (zero congestion).
+   * - Drops rapid identical duplicate commands within 250ms (zero retry/button-bounce loops).
+   * - Emergency Stop & explicit release (`priority = true`) ALWAYS bypass congestion/dedup guards.
    */
-  private enqueueCommand<T>(task: () => Promise<T>): Promise<T> {
-    const next = this.commandChain.then(task, task);
+  private enqueueCommand<T>(
+    task: () => Promise<T>,
+    options?: { sig?: string; priority?: boolean },
+  ): Promise<T> {
+    const priority = options?.priority === true;
+    const sig = options?.sig ?? '';
+    const now = Date.now();
+
+    if (!priority && !this.dryRunMode && sig && sig === this.lastCommandSig && now - this.lastCommandAt < SiemensS7Adapter.DUPLICATE_WINDOW_MS) {
+      return Promise.reject(
+        new ControllerError('Duplicate command suppressed to prevent PLC command loop', 'REJECTED'),
+      );
+    }
+    if (!priority && this.pendingCommands >= SiemensS7Adapter.MAX_PENDING_COMMANDS) {
+      return Promise.reject(
+        new ControllerError('PLC command queue is busy; please wait for the active command to finish', 'REJECTED'),
+      );
+    }
+
+    this.pendingCommands++;
+    const runTask = async (): Promise<T> => {
+      try {
+        const res = await task();
+        if (sig) {
+          this.lastCommandSig = sig;
+          this.lastCommandAt = Date.now();
+        }
+        // Brief pacing gap between sequential PLC commands (skipped in dry-run tests)
+        if (!this.dryRunMode) {
+          await new Promise((r) => setTimeout(r, 40));
+        }
+        return res;
+      } finally {
+        this.pendingCommands = Math.max(0, this.pendingCommands - 1);
+      }
+    };
+
+    const next = this.commandChain.then(runTask, runTask);
     this.commandChain = next.catch(() => undefined);
     return next;
   }
@@ -771,7 +815,8 @@ export class SiemensS7Adapter implements IndustrialController {
       }
     }
 
-    return this.enqueueCommand(async () => {
+    return this.enqueueCommand(
+      async () => {
       if (action === 'ESTOP_ON') {
         this.activeManualActionKeys.clear();
         // Immediately halt ALL PLC motion, step triggers, and modes sequentially
@@ -837,7 +882,9 @@ export class SiemensS7Adapter implements IndustrialController {
         action,
         message: 'تم إرسال نبضة إعادة ضبط آمنة (ParkDB.Reset) — لا يتم تصفير سجل الأعطال قسرياً إلا بزوال السبب الفيزيائي.',
       };
-    });
+    },
+    { sig: `RECOVERY:${action}`, priority: action === 'ESTOP_ON' || action === 'ESTOP_OFF' },
+    );
   }
 
   /**
@@ -847,7 +894,11 @@ export class SiemensS7Adapter implements IndustrialController {
    * - Releasing ANY valve or lane (`man_l1_tag`..`man_l4_tag`) ALWAYS explicitly writes `false` (fixes L2 InvertBit bug!)
    */
   async manualControl(controlKey: string, active: boolean): Promise<{ ok: boolean; controlKey: string; active: boolean; message: string }> {
-    return this.enqueueCommand(() => this.executeManualControlSerialized(controlKey, active));
+    const isRelease = !active || controlKey === 'stop_all_manual';
+    return this.enqueueCommand(
+      () => this.executeManualControlSerialized(controlKey, active),
+      { sig: `MANUAL:${controlKey}:${active}`, priority: isRelease },
+    );
   }
 
   private async executeManualControlSerialized(controlKey: string, active: boolean): Promise<{ ok: boolean; controlKey: string; active: boolean; message: string }> {
@@ -1010,11 +1061,11 @@ export class SiemensS7Adapter implements IndustrialController {
   }
 
   async sendParkCommand(cmd: ControllerCommand): Promise<void> {
-    await this.enqueueCommand(() => this.dispatchPlcCommand(cmd));
+    await this.enqueueCommand(() => this.dispatchPlcCommand(cmd), { sig: `PARK:${cmd.spaceNumber ?? cmd.commandId}` });
   }
 
   async sendRetrieveCommand(cmd: ControllerCommand): Promise<void> {
-    await this.enqueueCommand(() => this.dispatchPlcCommand(cmd));
+    await this.enqueueCommand(() => this.dispatchPlcCommand(cmd), { sig: `RETRIEVE:${cmd.spaceNumber ?? cmd.commandId}` });
   }
 
   private async dispatchPlcCommand(cmd: ControllerCommand): Promise<void> {
