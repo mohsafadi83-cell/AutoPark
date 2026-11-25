@@ -753,15 +753,31 @@ namespace AutoPark
 
             _btnCancelStep = new ModernButton
             {
-                Text = Loc.T("Cancel Step", "إلغاء الخطوة (Cancel)"),
-                BaseColor = Theme.ErrSoft,
-                HoverColor = Theme.Err,
-                ForeColor = Theme.Err,
-                BorderColor = Theme.Err,
-                Enabled = false
+                Text = Loc.T("🛑 Cancel / E-STOP", "🛑 إلغاء / إيقاف طارئ (E-STOP)"),
+                BaseColor = Theme.Err,
+                HoverColor = Color.FromArgb(185, 28, 28),
+                ForeColor = Color.White,
+                Enabled = true
             };
             _btnCancelStep.SetBounds(394, 368, 188, 46);
-            _btnCancelStep.Click += CancelCurrentOperation;
+            _btnCancelStep.Click += delegate
+            {
+                var ps = ParkState.Instance;
+                _cancelled = true;
+                _timer.Stop();
+                ps.EmergencyStop = true;
+                _lblStepStatus.ForeColor = Theme.Err;
+                _lblStepStatus.Text = Loc.T("🛑 EMERGENCY STOP (E-STOP) ACTIVATED — All PLC motion halted immediately!", "🛑 تم تفعيل إيقاف الطوارئ (E-STOP) — توقفت جميع حركات الـ PLC فوراً!");
+                if (_activeCmd != null)
+                {
+                    _activeCmd.Status = "CANCELLED";
+                    _activeCmd.CompletedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                }
+                ps.RecordLocalAudit("ESTOP_CANCEL", _chosenSpace != null ? _chosenSpace.SpaceNumber : "LIFT",
+                    Loc.T("Emergency Stop triggered from Park/Retrieve Cancel button", "تفعيل إيقاف الطوارئ من زر الإلغاء"), Loc.UserDisplay(_shell.CurrentUser));
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate { ps.SendRecoveryAction("ESTOP_ON"); });
+                ps.NotifyChanged();
+            };
 
             _btnReturnGround = new ModernButton
             {
@@ -810,7 +826,7 @@ namespace AutoPark
 
             _btnPauseTimer = new ModernButton
             {
-                Text = Loc.T("⏸ Pause Timer", "⏸ إيقاف المؤقت"),
+                Text = Loc.T("⏸ Pause", "⏸ إيقاف مؤقت"),
                 BaseColor = Theme.Blue,
                 HoverColor = Color.FromArgb(29, 78, 216),
                 ForeColor = Color.White
@@ -818,15 +834,21 @@ namespace AutoPark
             _btnPauseTimer.SetBounds(318, 424, 130, 40);
             _btnPauseTimer.Click += delegate
             {
+                var ps = ParkState.Instance;
                 _timerPaused = !_timerPaused;
-                _btnPauseTimer.Text = _timerPaused
+                bool pausedNow = _timerPaused;
+                _btnPauseTimer.Text = pausedNow
                     ? Loc.T("▶ Resume", "▶ استئناف")
-                    : Loc.T("⏸ Pause Timer", "⏸ إيقاف المؤقت");
-                _btnPauseTimer.BaseColor = _timerPaused ? Theme.Ok : Theme.Blue;
-                _lblStepStatus.ForeColor = Theme.Amber;
-                _lblStepStatus.Text = _timerPaused
-                    ? Loc.T("⏸ Timer PAUSED — Waiting for driver to exit vehicle & clear lift.", "⏸ تم إيقاف المؤقت — بانتظار خروج السائق وابتعاده عن المصعد.")
-                    : Loc.T("▶ Timer resumed — monitoring live PLC floor sensors...", "▶ تم استئناف المؤقت — جاري مراقبة حساسات الطوابق الحية...");
+                    : Loc.T("⏸ Pause", "⏸ إيقاف مؤقت");
+                _btnPauseTimer.BaseColor = pausedNow ? Theme.Ok : Theme.Blue;
+                _lblStepStatus.ForeColor = pausedNow ? Theme.Amber : Theme.Ok;
+                _lblStepStatus.Text = pausedNow
+                    ? Loc.T("⏸ PAUSED — Operation held safely. Press Resume to continue.", "⏸ إيقاف مؤقت — العملية معلّقة بأمان. اضغط استئناف للمتابعة.")
+                    : Loc.T("▶ RESUMED — Continuing operation & monitoring live PLC sensors...", "▶ تم الاستئناف — جاري متابعة العملية ومراقبة الحساسات الحية...");
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                {
+                    ps.SendManualControl("auto_mode_tag", !pausedNow);
+                });
             };
 
             var btnClose = new ModernButton

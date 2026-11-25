@@ -944,6 +944,26 @@ export class SiemensS7Adapter implements IndustrialController {
       throw new ControllerError('Cannot activate manual output while Emergency Stop is active', 'REJECTED');
     }
 
+    if (controlKey === 'cancel_inside_sensor_tag' || controlKey === 'cancel_outside_sensor_tag') {
+      if (active) {
+        // TIA Portal OB1 Network 5/6 resets M6.1 & M6.2 whenever DB1,X2.7 (Sim Manual) is 0!
+        await this.tryWriteLogicalTag('sim_manual_tag', true);
+        await this.tryWriteLogicalTag(controlKey, true);
+      } else {
+        await this.tryWriteLogicalTag(controlKey, false);
+        const otherKey = controlKey === 'cancel_inside_sensor_tag' ? 'cancel_outside_sensor_tag' : 'cancel_inside_sensor_tag';
+        if (!Boolean(this.lastValues[otherKey])) {
+          await this.tryWriteLogicalTag('sim_manual_tag', false);
+        }
+      }
+      return {
+        ok: true,
+        controlKey,
+        active,
+        message: `${controlKey} = ${active ? 'ON (DB1,X2.7 + PLC latched)' : 'OFF'}`,
+      };
+    }
+
     if (controlKey === 'manual_mode_tag') {
       this.softManualMode = active;
       await this.tryWriteLogicalTag('user_logoff_tag', false);

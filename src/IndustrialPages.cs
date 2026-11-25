@@ -896,9 +896,21 @@ namespace AutoPark
                 _btnCancelOut.Invalidate();
             }
             ParkState.Instance.RecordLocalAudit("SENSOR_BYPASS", plcAddr, key + "=" + (next ? "1" : "0"), Loc.UserDisplay(_shell.CurrentUser));
+            bool bothOff = !_cancelInOn && !_cancelOutOn;
             ThreadPool.QueueUserWorkItem(delegate
             {
-                string resp = ParkState.Instance.SendPlcWriteBool(plcAddr, next, 0);
+                string resp;
+                if (next)
+                {
+                    // TIA Portal OB1 Network 5/6 resets M6.1 & M6.2 whenever DB1,X2.7 ("Sim Manual") is 0!
+                    ParkState.Instance.SendPlcWriteBool("DB1,X2.7", true, 0);
+                    resp = ParkState.Instance.SendPlcWriteBool(plcAddr, true, 0);
+                }
+                else
+                {
+                    resp = ParkState.Instance.SendPlcWriteBool(plcAddr, false, 0);
+                    if (bothOff) ParkState.Instance.SendPlcWriteBool("DB1,X2.7", false, 0);
+                }
                 if (!IsDisposed && IsHandleCreated)
                 {
                     try
@@ -907,8 +919,8 @@ namespace AutoPark
                         {
                             bool ok = string.IsNullOrEmpty(resp) || !resp.StartsWith("ERR:");
                             _lblAutoTrack.Text = ok
-                                ? Loc.T("✅ PLC " + plcAddr + " (" + (inside ? "Cancel Inside" : "Cancel Outside") + ") = " + (next ? "ON" : "OFF"),
-                                        "✅ تم ضبط " + plcAddr + " (" + (inside ? "إلغاء الداخلي" : "إلغاء الخارجي") + ") = " + (next ? "ON" : "OFF"))
+                                ? Loc.T("✅ PLC " + plcAddr + " (" + (inside ? "Cancel Inside" : "Cancel Outside") + ") = " + (next ? "ON (Latched)" : "OFF"),
+                                        "✅ تم تفعيل " + plcAddr + " (" + (inside ? "إلغاء الداخلي" : "إلغاء الخارجي") + ") = " + (next ? "ON (مفعّل على PLC)" : "OFF"))
                                 : Loc.T("⚠ PLC " + plcAddr + " failed: " + resp, "⚠ فشل كتابة " + plcAddr + ": " + resp);
                         });
                     }

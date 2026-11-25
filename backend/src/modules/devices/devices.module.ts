@@ -389,7 +389,11 @@ export class DevicesService {
       Boolean(params.rawMac);
     if (!isMobile) return;
 
-    // Only defined company employees (not external customers) may access via the mobile app
+    // When MAC / Device Whitelist enforcement is turned OFF, allow everyone to install & run the app freely
+    const enforcePolicy = await this.getEnforceWhitelist();
+    if (!enforcePolicy) return;
+
+    // Only defined company employees (not external customers) may access via the mobile app when enforcement is ON
     if (params.userRole && params.userRole.toUpperCase() === 'CUSTOMER') {
       throw new AppError(
         'ONLY_EMPLOYEES_ALLOWED',

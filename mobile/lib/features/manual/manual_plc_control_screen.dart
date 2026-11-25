@@ -629,14 +629,24 @@ class _ManualPlcControlScreenState
     setState(() => _toggleStates[key] = next);
     HapticFeedback.mediumImpact();
     final notifier = ref.read(appControllerProvider.notifier);
+    final otherKey = inside ? 'cancel_outside_sensor_tag' : 'cancel_inside_sensor_tag';
+    final bothOff = !next && (_toggleStates[otherKey] != true);
     try {
-      await notifier.writeLivePlcTag(plcAddr, next);
-      await notifier.sendManualControl(key, next).catchError((_) => const <String, dynamic>{});
+      if (next) {
+        // TIA Portal OB1 Network 5/6 resets M6.1 & M6.2 whenever DB1,X2.7 (Sim Manual) is 0!
+        await notifier.writeLivePlcTag('DB1,X2.7', true);
+        await notifier.writeLivePlcTag(plcAddr, true);
+      } else {
+        await notifier.writeLivePlcTag(plcAddr, false);
+        if (bothOff) {
+          await notifier.writeLivePlcTag('DB1,X2.7', false).catchError((_) => const <String, dynamic>{});
+        }
+      }
       if (!mounted) return;
       _showToast(
         isAr
-            ? '✅ تم تحديث $plcAddr (${next ? "ON" : "OFF"}) على الـ PLC'
-            : '✅ PLC $plcAddr updated (${next ? "ON" : "OFF"})',
+            ? '✅ تم تفعيل $plcAddr (${next ? "ON على PLC" : "OFF"})'
+            : '✅ PLC $plcAddr updated (${next ? "ON & Latched" : "OFF"})',
       );
     } catch (e) {
       if (!mounted) return;
