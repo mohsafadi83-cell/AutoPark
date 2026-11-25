@@ -613,6 +613,10 @@ namespace AutoPark
         bool _cancelled = false;
         volatile bool _backendDispatched = false;
         volatile bool _sensorPollInFlight = false;
+        bool _timerPaused = false;
+        bool _holdingLowerHome = false;
+        ModernButton _btnPauseTimer;
+        ModernButton _btnReturnGround;
         SpaceItem _chosenSpace;
         string _chosenPlate;
         CommandRecord _activeCmd;
@@ -760,48 +764,70 @@ namespace AutoPark
             _btnCancelStep.SetBounds(394, 368, 188, 46);
             _btnCancelStep.Click += CancelCurrentOperation;
 
-            var btnReturnGround = new ModernButton
+            _btnReturnGround = new ModernButton
             {
-                Text = Loc.T("⬇ Return Lift to Home (Initial Position)", "⬇ إرجاع المصعد للوضع الابتدائي (Home)"),
+                Text = Loc.T("⬇ Hold to Lower Lift to Home Position", "⬇ اضغط واستمر لإرجاع المصعد للوضع الابتدائي (Home)"),
                 BaseColor = Theme.Amber,
                 HoverColor = Color.FromArgb(180, 83, 9),
+                PressColor = Theme.Ok,
                 ForeColor = Color.White
             };
-            btnReturnGround.SetBounds(22, 424, 386, 40);
-            btnReturnGround.Click += delegate
+            _btnReturnGround.SetBounds(22, 424, 290, 40);
+            _btnReturnGround.MouseDown += delegate (object s, MouseEventArgs e)
             {
+                if (e.Button != MouseButtons.Left) return;
                 var ps = ParkState.Instance;
-                if (ps.IsPlcCommandBusy) return;
                 if (ps.EmergencyStop || ps.Sensors.EmergencyPhysical)
                 {
                     Loc.ShowMsg("Cannot lower lift while Emergency Stop is active!", "لا يمكن إنزال المصعد أثناء تفعيل إيقاف الطوارئ!", "Safety", "أمان", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
-                btnReturnGround.Enabled = false;
+                _holdingLowerHome = true;
                 _lblStepStatus.ForeColor = Theme.Amber;
-                _lblStepStatus.Text = Loc.T("⬇ Returning lift to Home / Initial Position (single command)...", "⬇ جاري إرجاع المصعد إلى الوضع الابتدائي (Home)...");
+                _lblStepStatus.Text = Loc.T("⬇ Lowering lift to Home (HOLDING — release button to stop immediately)...", "⬇ جاري إنزال المصعد للوضع الابتدائي (ضغط مستمر — ارفع يدك للتوقف فوراً)...");
                 System.Threading.ThreadPool.QueueUserWorkItem(delegate
                 {
-                    string resp = ps.SendRecoveryAction("RETURN_PARK");
-                    if (!IsDisposed && IsHandleCreated)
-                    {
-                        try
-                        {
-                            BeginInvoke((Action)delegate
-                            {
-                                btnReturnGround.Enabled = true;
-                                bool ok = string.IsNullOrEmpty(resp) || !resp.StartsWith("ERR:");
-                                _lblStepStatus.ForeColor = ok ? Theme.Ok : Theme.Err;
-                                _lblStepStatus.Text = ok
-                                    ? Loc.T("✅ Lift returned to Home / Initial Position.", "✅ تم إرجاع المصعد إلى الوضع الابتدائي (Home) بنجاح.")
-                                    : Loc.T("⚠ Return Home failed: " + resp, "⚠ تعذر إرجاع المصعد: " + resp);
-                            });
-                        }
-                        catch { }
-                    }
+                    ps.SendManualControl("manual_mode_tag", true);
+                    ps.SendManualControl("man_down_tag", true);
                 });
-                ps.RecordLocalAudit("RETURN_HOME", _chosenSpace != null ? _chosenSpace.SpaceNumber : "LIFT",
-                    Loc.T("Return lift to Home / Initial Position", "إرجاع المصعد للوضع الابتدائي (Home)"), Loc.UserDisplay(_shell.CurrentUser));
+                ps.RecordLocalAudit("HOLD_LOWER_HOME", _chosenSpace != null ? _chosenSpace.SpaceNumber : "LIFT",
+                    Loc.T("Manual press-and-hold lower lift to Home Position", "إنزال المصعد بالضغط المستمر إلى الوضع الابتدائي"), Loc.UserDisplay(_shell.CurrentUser));
+            };
+            Action releaseHoldLower = delegate
+            {
+                if (!_holdingLowerHome) return;
+                _holdingLowerHome = false;
+                var ps = ParkState.Instance;
+                _lblStepStatus.ForeColor = Theme.Ok;
+                _lblStepStatus.Text = Loc.T("🟢 Lowering stopped (button released). Hold again if lift is not yet at Home.", "🟢 توقف النزول (تم إفلات الزر). اضغط واستمر مجدداً إذا لم يصل المصعد للوضع الابتدائي.");
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                {
+                    ps.SendManualControl("man_down_tag", false);
+                });
+            };
+            _btnReturnGround.MouseUp += delegate { releaseHoldLower(); };
+            _btnReturnGround.MouseLeave += delegate { releaseHoldLower(); };
+            _btnReturnGround.LostFocus += delegate { releaseHoldLower(); };
+
+            _btnPauseTimer = new ModernButton
+            {
+                Text = Loc.T("⏸ Pause Timer", "⏸ إيقاف المؤقت"),
+                BaseColor = Theme.Blue,
+                HoverColor = Color.FromArgb(29, 78, 216),
+                ForeColor = Color.White
+            };
+            _btnPauseTimer.SetBounds(318, 424, 130, 40);
+            _btnPauseTimer.Click += delegate
+            {
+                _timerPaused = !_timerPaused;
+                _btnPauseTimer.Text = _timerPaused
+                    ? Loc.T("▶ Resume", "▶ استئناف")
+                    : Loc.T("⏸ Pause Timer", "⏸ إيقاف المؤقت");
+                _btnPauseTimer.BaseColor = _timerPaused ? Theme.Ok : Theme.Blue;
+                _lblStepStatus.ForeColor = Theme.Amber;
+                _lblStepStatus.Text = _timerPaused
+                    ? Loc.T("⏸ Timer PAUSED — Waiting for driver to exit vehicle & clear lift.", "⏸ تم إيقاف المؤقت — بانتظار خروج السائق وابتعاده عن المصعد.")
+                    : Loc.T("▶ Timer resumed — monitoring live PLC floor sensors...", "▶ تم استئناف المؤقت — جاري مراقبة حساسات الطوابق الحية...");
             };
 
             var btnClose = new ModernButton
@@ -812,10 +838,10 @@ namespace AutoPark
                 ForeColor = Theme.Ink,
                 BorderColor = Theme.Border
             };
-            btnClose.SetBounds(420, 424, 162, 40);
-            btnClose.Click += delegate { Close(); };
+            btnClose.SetBounds(454, 424, 128, 40);
+            btnClose.Click += delegate { releaseHoldLower(); Close(); };
 
-            card.Controls.AddRange(new Control[] { title, lblSelect, _cmbVehicle, lblManual, _txtPlate, _radMyCar, _radOtherCar, _lblElevatorPos, _lblStepStatus, _progress, _btnExecute, _btnCancelStep, btnReturnGround, btnClose });
+            card.Controls.AddRange(new Control[] { title, lblSelect, _cmbVehicle, lblManual, _txtPlate, _radMyCar, _radOtherCar, _lblElevatorPos, _lblStepStatus, _progress, _btnExecute, _btnCancelStep, _btnReturnGround, _btnPauseTimer, btnClose });
             Controls.Add(card);
 
             _timer = new Timer { Interval = 750 };
@@ -1106,6 +1132,8 @@ namespace AutoPark
                 return;
             }
 
+            if (_timerPaused) return;
+
             if (_stepIndex < _dynamicSteps.Count)
             {
                 int stepCode = _stepFloors[_stepIndex];
@@ -1123,28 +1151,18 @@ namespace AutoPark
                             finally { _sensorPollInFlight = false; }
                         });
                     }
+                    // STRICT physical limit switch check: NEVER declare arrival while the lift is still moving!
                     bool lsReached = st.Sensors.LimitSwitches[lane - 1, stepCode - 1];
-                    // Also accept PLC's own Step-Done / Step2-Ready handshake (Park_Step1_Done DB2,X5.5 / Park_Step2_Ready DB2,X5.6 / Park_Step2_OK DB2,X6.1)
-                    bool plcStepReady = st.Sensors.Step1Done || st.Sensors.Step2Ready || st.Sensors.Step2Done;
-                    bool reached = lsReached || plcStepReady;
+                    bool reached = lsReached;
 
-                    if (!reached && _waitTicks < 60)
+                    if (!reached && _waitTicks < 180)
                     {
                         _waitTicks++;
                         _lblElevatorPos.ForeColor = Theme.Amber;
                         string lsName = "PL" + lane + "_LS_" + (stepCode == 3 ? "TOP" : (stepCode == 2 ? "MID" : "BTM"));
-                        if (_waitTicks % 15 == 0)
-                        {
-                            _lblElevatorPos.Text = Loc.T(
-                                "🔄 Refreshing PLC sensors (" + lsName + " — " + _waitTicks + "/60)...",
-                                "🔄 تحديث قراءة حساسات الـ PLC (" + lsName + " — " + _waitTicks + "/60)...");
-                        }
-                        else
-                        {
-                            _lblElevatorPos.Text = Loc.T(
-                                "⏳ Waiting for " + lsName + " / PLC Step1 Done (" + _waitTicks + "/60)...",
-                                "⏳ انتظار تأكيد الحساس " + lsName + " أو إتمام المرحلة 1 من الـ PLC (" + _waitTicks + "/60)...");
-                        }
+                        _lblElevatorPos.Text = Loc.T(
+                            "⏳ Lifting to Floor P" + stepCode + " — waiting for real PLC sensor " + lsName + " (" + _waitTicks + "s)...",
+                            "⏳ جاري رفع/تحريك المصعد للطابق P" + stepCode + " — بانتظار تأكيد الحساس الفعلي " + lsName + " (" + _waitTicks + " ث)...");
                         return;
                     }
                     if (!reached)
@@ -1194,9 +1212,9 @@ namespace AutoPark
                     else
                     {
                         _lblElevatorPos.ForeColor = Theme.Ok;
-                        _lblElevatorPos.Text = plcStepReady && !lsReached
-                            ? Loc.T("🟢 PLC Step 1 confirmed ready (Step2_Ready=ON) — advancing to Step 2!", "🟢 الـ PLC أكّد جاهزية المرحلة 2 (Step2_Ready=ON) — جاري إكمال الأمر!")
-                            : Loc.T("🟢 Lift Position (Lane " + lane + "): Floor P" + stepCode + " confirmed ON", "🟢 تأكيد موضع المصعد في المسار " + lane + ": الطابق P" + stepCode + " = ON");
+                        _lblElevatorPos.Text = Loc.T(
+                            "🟢 Lift Position (Lane " + lane + "): Floor P" + stepCode + " confirmed ON!",
+                            "🟢 تأكيد موضع المصعد الفعلي (المسار " + lane + "): الطابق P" + stepCode + " = ON!");
                     }
                 }
                 else if (stepCode >= 1 && stepCode <= 3)
@@ -1224,18 +1242,12 @@ namespace AutoPark
                 }
                 else if (stepCode == -2)
                 {
-                    _activeCmd.Status = "EXECUTING";
-                    // Execute exact TIA Portal Page 104 Step 2 command on live S7-1200 PLC to finish the cycle!
-                    System.Threading.ThreadPool.QueueUserWorkItem(delegate
-                    {
-                        st.SendPlcWriteBool("M10.1", true, 0);     // SetBit(Park_IN_Step2_Start)
-                        st.SendPlcWriteBool("DB2,X5.6", false, 0); // ResetBit(Park_Step2_Ready)
-                    });
-                    if (!_backendDispatched && !st.BackendConnected)
-                    {
-                        var appSet = _shell.Settings;
-                        System.Threading.ThreadPool.QueueUserWorkItem(delegate { ExecutePlcStep2Handshake(appSet); });
-                    }
+                    // NEVER auto-lower the lift! Hold here until driver exits & operator presses/holds Return Lift to Home.
+                    _activeCmd.Status = "WAITING_DRIVER_CLEAR";
+                    _lblStepStatus.ForeColor = Theme.Ok;
+                    _lblStepStatus.Text = Loc.T(
+                        "✅ Lift reached floor! Wait until driver exits & moves clear, then PRESS & HOLD '⬇ Hold to Lower Lift to Home Position'.",
+                        "✅ وصل المصعد للطابق! انتظر حتى يخرج السائق ويبتعد عن المصعد، ثم اضغط واستمر على '⬇ اضغط واستمر لإرجاع المصعد للوضع الابتدائي'.");
                 }
 
                 _stepIndex++;
@@ -1280,17 +1292,25 @@ namespace AutoPark
             _activeCmd.CompletedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
             st.NotifyChanged();
 
+            // Keep dialog OPEN after arrival so operator can wait for driver to exit & press/hold 'Hold to Lower Lift to Home Position'!
+            _lblStepStatus.ForeColor = Theme.Ok;
+            _lblStepStatus.Text = _opType == "PARK"
+                ? Loc.T("✅ Deposit Completed (Bay " + _chosenSpace.SpaceNumber + ")! Wait for driver to clear lift, then HOLD '⬇ Hold to Lower Lift to Home Position'.",
+                        "✅ تم الإيداع بنجاح (المصف " + _chosenSpace.SpaceNumber + ")! بعد خروج السائق، اضغط واستمر على زر '⬇ إرجاع المصعد للوضع الابتدائي'.")
+                : Loc.T("✅ Vehicle ready at Bay " + _chosenSpace.SpaceNumber + "! After driver clears lift, HOLD '⬇ Hold to Lower Lift to Home Position'.",
+                        "✅ المركبة جاهزة في المصف " + _chosenSpace.SpaceNumber + "! بعد ابتعاد السائق، اضغط واستمر على زر '⬇ إرجاع المصعد للوضع الابتدائي'.");
+            _btnReturnGround.BaseColor = Theme.Ok;
+            _btnReturnGround.Invalidate();
             Loc.ShowMsg(
                 _opType == "PARK"
-                    ? "Deposit Completed!\n\nVehicle (" + _chosenPlate + ") parked successfully in Bay " + _chosenSpace.SpaceNumber + "!"
-                    : "Vehicle (" + _chosenPlate + ") is ready for pickup from Bay " + _chosenSpace.SpaceNumber + "!",
+                    ? "Deposit Completed!\n\nVehicle (" + _chosenPlate + ") arrived at Bay " + _chosenSpace.SpaceNumber + ".\n\nIMPORTANT: Wait until the driver exits and moves clear, then PRESS & HOLD '⬇ Hold to Lower Lift to Home Position' on this screen to lower the lift."
+                    : "Vehicle (" + _chosenPlate + ") arrived from Bay " + _chosenSpace.SpaceNumber + "!\n\nAfter clearing the lift, PRESS & HOLD '⬇ Hold to Lower Lift to Home Position' on this screen.",
                 _opType == "PARK"
-                    ? "تم الإيداع بنجاح (Deposit Completed)!\n\nتم إيداع المركبة (" + _chosenPlate + ") في المصف " + _chosenSpace.SpaceNumber + " بتأكيد الـ PLC!"
-                    : "المركبة (" + _chosenPlate + ") جاهزة للاستلام عند البوابة من المصف " + _chosenSpace.SpaceNumber + "!",
+                    ? "تم الإيداع بنجاح (Deposit Completed)!\n\nوصلت المركبة (" + _chosenPlate + ") إلى المصف " + _chosenSpace.SpaceNumber + ".\n\nمهم: انتظر حتى يخرج السائق ويبتعد عن المصعد، ثم اضغط واستمر على زر '⬇ اضغط واستمر لإرجاع المصعد للوضع الابتدائي' في هذه الشاشة لإنزال المصعد."
+                    : "وصلت المركبة (" + _chosenPlate + ") من المصف " + _chosenSpace.SpaceNumber + "!\n\nبعد خروج السائق، اضغط واستمر على زر '⬇ اضغط واستمر لإرجاع المصعد للوضع الابتدائي' في هذه الشاشة.",
                 _opType == "PARK" ? "Deposit Completed" : "Operation Completed",
                 _opType == "PARK" ? "تم الإيداع بنجاح" : "اكتملت العملية بنجاح",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
-            Close();
         }
 
         static void ExecutePlcStep1Handshake(AppSettings settings, string opType, string spotCode)

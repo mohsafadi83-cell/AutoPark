@@ -898,9 +898,22 @@ namespace AutoPark
             ParkState.Instance.RecordLocalAudit("SENSOR_BYPASS", plcAddr, key + "=" + (next ? "1" : "0"), Loc.UserDisplay(_shell.CurrentUser));
             ThreadPool.QueueUserWorkItem(delegate
             {
-                // Write directly to PLC %M6.1 / %M6.2 AND sync logical key
-                ParkState.Instance.SendPlcWriteBool(plcAddr, next, 0);
-                ParkState.Instance.SendManualControl(key, next);
+                string resp = ParkState.Instance.SendPlcWriteBool(plcAddr, next, 0);
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    try
+                    {
+                        BeginInvoke((Action)delegate
+                        {
+                            bool ok = string.IsNullOrEmpty(resp) || !resp.StartsWith("ERR:");
+                            _lblAutoTrack.Text = ok
+                                ? Loc.T("✅ PLC " + plcAddr + " (" + (inside ? "Cancel Inside" : "Cancel Outside") + ") = " + (next ? "ON" : "OFF"),
+                                        "✅ تم ضبط " + plcAddr + " (" + (inside ? "إلغاء الداخلي" : "إلغاء الخارجي") + ") = " + (next ? "ON" : "OFF"))
+                                : Loc.T("⚠ PLC " + plcAddr + " failed: " + resp, "⚠ فشل كتابة " + plcAddr + ": " + resp);
+                        });
+                    }
+                    catch { }
+                }
             });
         }
 
@@ -931,7 +944,7 @@ namespace AutoPark
             }
             else if (s.ManualMode)
             {
-                _lblModePill.Text = "● HOME MODE";
+                _lblModePill.Text = "● MANUAL";
                 _lblModePill.BackColor = Theme.AmberSoft;
                 _lblModePill.ForeColor = Theme.Amber;
             }
@@ -1066,7 +1079,7 @@ namespace AutoPark
             var modeBar = new Panel { Dock = DockStyle.Top, Height = 52, Padding = new Padding(0, 4, 0, 4) };
             _btnModeManual = new ModernButton
             {
-                Text = Loc.T("Home Mode", "وضع التموضع (Home)"),
+                Text = Loc.T("Manual Mode", "الوضع اليدوي"),
                 IconGlyph = Icons.Settings,
                 BaseColor = Theme.Amber,
                 HoverColor = Color.FromArgb(180, 83, 9)
@@ -1171,7 +1184,7 @@ namespace AutoPark
 
             holdGrid.Controls.Add(MakeToggleButton(Loc.T("⚡ Pump", "⚡ المضخة (Pump)"), "man_pump_tag", Theme.Primary), 0, 0);
             holdGrid.Controls.Add(MakeToggleButton(Loc.T("⬆ Lift UP", "⬆ صعود (UP)"), "man_up_tag", Theme.Blue), 1, 0);
-            holdGrid.Controls.Add(MakeMomentaryButton(Loc.T("⬇ Lift DOWN (Hold)", "⬇ نزول (ضغط مستمر)"), "man_down_tag", Color.FromArgb(30, 64, 175)), 2, 0);
+            holdGrid.Controls.Add(MakeToggleButton(Loc.T("⬇ Lift DOWN", "⬇ نزول (DOWN)"), "man_down_tag", Color.FromArgb(30, 64, 175)), 2, 0);
             holdGrid.Controls.Add(MakeToggleButton(Loc.T("🧱 Wall Valve", "🧱 الحاجز (Wall)"), "man_wall_tag", Theme.Purple), 3, 0);
 
             holdGrid.Controls.Add(MakeToggleButton(Loc.T("🔧 Cutoff Valve", "🔧 صمام القطع (Cutoff)"), "man_cutoff_tag", Theme.Ink), 0, 1);
@@ -1616,8 +1629,8 @@ namespace AutoPark
             ParkState.Instance.Sensors.AutoMode = !enableManual;
             if (_liveMonitor != null) _liveMonitor.RenderNow();
             _lblStatus.Text = enableManual
-                ? Loc.T("🟠 Home Mode Active — Controls unlocked. Press Home Position to return lift to home.", "🟠 وضع التموضع (Home Mode) مفعّل — اضغط الوضع الابتدائي (Home) لإرجاع المصعد.")
-                : Loc.T("🟢 Auto Mode Active — Home Mode controls locked.", "🟢 الوضع التلقائي مفعّل — تم قفل أزرار وضع التموضع.");
+                ? Loc.T("🟠 Manual Mode Active — Click any button to toggle ON/OFF.", "🟠 الوضع اليدوي مفعّل (Manual Mode Active) — اضغط على أي زر للتشغيل أو الإيقاف.")
+                : Loc.T("🟢 Auto Mode Active — Manual controls locked.", "🟢 الوضع التلقائي مفعّل (Auto Mode Active) — تم قفل أزرار التحكم اليدوي.");
             _lblStatus.ForeColor = enableManual ? Theme.Amber : Theme.Ok;
 
             ParkState.Instance.RecordLocalAudit("MODE_SWITCH", enableManual ? "MANUAL" : "AUTO",
