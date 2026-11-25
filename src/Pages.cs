@@ -789,7 +789,7 @@ namespace AutoPark
                 HoverColor = Color.FromArgb(180, 83, 9),
                 PressColor = Theme.Ok,
                 ForeColor = Color.White,
-                Enabled = false
+                Enabled = true
             };
             _btnReturnGround.SetBounds(22, 424, 290, 40);
             _btnReturnGround.Click += delegate
@@ -842,7 +842,6 @@ namespace AutoPark
             _btnPauseTimer.SetBounds(318, 424, 130, 40);
             _btnPauseTimer.Click += delegate
             {
-                var ps = ParkState.Instance;
                 _timerPaused = !_timerPaused;
                 bool pausedNow = _timerPaused;
                 if (pausedNow)
@@ -859,13 +858,10 @@ namespace AutoPark
                     : Loc.T("⏸ Pause", "⏸ إيقاف مؤقت");
                 _btnPauseTimer.BaseColor = pausedNow ? Theme.Ok : Theme.Blue;
                 _lblStepStatus.ForeColor = pausedNow ? Theme.Amber : Theme.Ok;
+                // Display-only timer pause: NEVER writes or interrupts PLC motion!
                 _lblStepStatus.Text = pausedNow
-                    ? Loc.T("⏸ PAUSED — Operation held safely. Press Resume to continue.", "⏸ إيقاف مؤقت — العملية معلّقة بأمان. اضغط استئناف للمتابعة.")
-                    : Loc.T("▶ RESUMED — Continuing operation & monitoring live PLC sensors...", "▶ تم الاستئناف — جاري متابعة العملية ومراقبة الحساسات الحية...");
-                System.Threading.ThreadPool.QueueUserWorkItem(delegate
-                {
-                    ps.SendManualControl("auto_mode_tag", !pausedNow);
-                });
+                    ? Loc.T("⏸ Display timer paused (PLC unaffected).", "⏸ تم إيقاف عداد الوقت للعرض فقط (بدون التأثير على الـ PLC).")
+                    : Loc.T("▶ Display timer resumed — reading live PLC sensors.", "▶ تم استئناف عداد الوقت — جاري عرض قراءات الحساسات الحية.");
             };
 
             var btnClose = new ModernButton
@@ -1076,7 +1072,6 @@ namespace AutoPark
             _progress.Value = 0;
 
             _btnExecute.Enabled = false;
-            _btnReturnGround.Enabled = false; // Never allow pre-queued Return Home while lift is moving!
             _btnCancelStep.Enabled = true;
             _cmbVehicle.Enabled = false;
             _txtPlate.Enabled = false;
