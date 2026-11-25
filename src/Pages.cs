@@ -769,17 +769,37 @@ namespace AutoPark
                 _cancelled = true;
                 _timer.Stop();
                 ps.EmergencyStop = true;
+                // When canceled during PARK, the car must NEVER be entered/parked!
+                if (_opType == "PARK" && _chosenSpace != null)
+                {
+                    _chosenSpace.Status = "AVAILABLE";
+                    _chosenSpace.PlateNumber = "";
+                    _chosenSpace.OwnerName = "";
+                    _chosenSpace.ParkedByUsername = "";
+                    _chosenSpace.IsOtherVehicle = false;
+                    _chosenSpace.UpdatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                }
                 _lblStepStatus.ForeColor = Theme.Err;
-                _lblStepStatus.Text = Loc.T("🛑 EMERGENCY STOP (E-STOP) ACTIVATED — All PLC motion halted immediately!", "🛑 تم تفعيل إيقاف الطوارئ (E-STOP) — توقفت جميع حركات الـ PLC فوراً!");
+                _lblStepStatus.Text = Loc.T("🛑 CANCELLED / E-STOP ACTIVATED — Motion halted & vehicle NOT parked!", "🛑 تم الإلغاء وإيقاف الطوارئ (E-STOP) — توقفت الحركة ولم يتم إيداع المركبة!");
                 if (_activeCmd != null)
                 {
                     _activeCmd.Status = "CANCELLED";
                     _activeCmd.CompletedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
                 }
-                ps.RecordLocalAudit("ESTOP_CANCEL", _chosenSpace != null ? _chosenSpace.SpaceNumber : "LIFT",
-                    Loc.T("Emergency Stop triggered from Park/Retrieve Cancel button", "تفعيل إيقاف الطوارئ من زر الإلغاء"), Loc.UserDisplay(_shell.CurrentUser));
-                System.Threading.ThreadPool.QueueUserWorkItem(delegate { ps.SendRecoveryAction("ESTOP_ON"); });
+                string spotCodeCopy = _chosenSpace != null ? _chosenSpace.SpaceNumber : "";
+                bool wasPark = (_opType == "PARK");
+                ps.RecordLocalAudit("ESTOP_CANCEL", string.IsNullOrEmpty(spotCodeCopy) ? "LIFT" : spotCodeCopy,
+                    Loc.T("Emergency Stop & Cancel — vehicle not parked", "إلغاء وإيقاف طارئ — لم يتم إيداع المركبة"), Loc.UserDisplay(_shell.CurrentUser));
+                ps.Save();
                 ps.NotifyChanged();
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                {
+                    ps.SendRecoveryAction("ESTOP_ON");
+                    ps.CancelLatestActiveRequestOnBackend();
+                    if (wasPark && !string.IsNullOrEmpty(spotCodeCopy))
+                        ps.SendManualControl("spot_" + spotCodeCopy + "_tag", false);
+                    ps.PullSpacesFromDatabase();
+                });
             };
 
             _btnReturnGround = new ModernButton
@@ -964,9 +984,19 @@ namespace AutoPark
                     Loc.ShowMsg("Vehicle " + _chosenPlate + " is already parked!", "المركبة " + _chosenPlate + " مصفوفة بالفعل داخل النظام!", "Rejected", "رفض الأمر", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
-                _chosenSpace = _targetSpace != null && _targetSpace.Status == "AVAILABLE"
-                    ? _targetSpace
-                    : st.Spaces.Find(s => s.Status == "AVAILABLE");
+                if (_targetSpace != null)
+                {
+                    if (_targetSpace.Status != "AVAILABLE")
+                    {
+                        Loc.ShowMsg("Bay " + _targetSpace.SpaceNumber + " is not available right now (" + _targetSpace.Status + ").", "المصف " + _targetSpace.SpaceNumber + " غير متاح حالياً (" + _targetSpace.Status + ").", "Notice", "تنبيه", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                    _chosenSpace = _targetSpace;
+                }
+                else
+                {
+                    _chosenSpace = st.Spaces.Find(s => s.Status == "AVAILABLE");
+                }
 
                 if (_chosenSpace == null)
                 {
@@ -1026,36 +1056,13 @@ namespace AutoPark
             _dynamicSteps.Add(Loc.T("2) Step 1 (Get Park): Writing Lane=" + lane + ", Level=" + plcLevel + " + Auto_DB=1 + Step1_Start", "2) المرحلة 1 (Get Park): إرسال Lane_Number=" + lane + " و Level_Number=" + plcLevel + " + Auto_DB=1 + Step1_Start"));
             _stepFloors.Add(-1);
 
-            if (startFloor < targetUiFloor)
-            {
-                for (int f = startFloor + 1; f <= targetUiFloor; f++)
-                {
-                    string lsTag = "PL" + lane + "_LS_" + (f == 3 ? "TOP" : (f == 2 ? "MID" : "BTM"));
-                    _dynamicSteps.Add(Loc.T(
-                        "⬆ Precision stop ascending at Floor P" + f + " — Limit Switch " + lsTag + " = ON",
-                        "⬆ توقف دقيق أثناء الصعود عند الطابق P" + f + " — تأكيد الحساس " + lsTag + " = ON"));
-                    _stepFloors.Add(f);
-                }
-            }
-            else if (startFloor > targetUiFloor)
-            {
-                for (int f = startFloor - 1; f >= targetUiFloor; f--)
-                {
-                    string lsTag = "PL" + lane + "_LS_" + (f == 3 ? "TOP" : (f == 2 ? "MID" : "BTM"));
-                    _dynamicSteps.Add(Loc.T(
-                        "⬇ Precision stop descending at Floor P" + f + " — Limit Switch " + lsTag + " = ON",
-                        "⬇ توقف دقيق أثناء النزول عند الطابق P" + f + " — تأكيد الحساس " + lsTag + " = ON"));
-                    _stepFloors.Add(f);
-                }
-            }
-            else
-            {
-                string lsTag = "PL" + lane + "_LS_" + (targetUiFloor == 3 ? "TOP" : (targetUiFloor == 2 ? "MID" : "BTM"));
-                _dynamicSteps.Add(Loc.T(
-                    "🎯 Lift aligned at Target Floor P" + targetUiFloor + " — " + lsTag + " = ON",
-                    "🎯 المصعد في الطابق المستهدف P" + targetUiFloor + " — تأكيد الحساس " + lsTag + " = ON"));
-                _stepFloors.Add(targetUiFloor);
-            }
+            // Target the requested floor DIRECTLY (e.g. L42 -> Floor P2 / PL4_LS_MID directly, never wrong Floor 1)
+            string targetLsTag = "PL" + lane + "_LS_" + (targetUiFloor == 3 ? "TOP" : (targetUiFloor == 2 ? "MID" : "BTM"));
+            string dirArrow = startFloor < targetUiFloor ? "⬆" : (startFloor > targetUiFloor ? "⬇" : "🎯");
+            _dynamicSteps.Add(Loc.T(
+                dirArrow + " Moving Lane " + lane + " directly to Target Floor P" + targetUiFloor + " (" + _chosenSpace.SpaceNumber + ") — Limit Switch " + targetLsTag + " = ON",
+                dirArrow + " تحريك المسار " + lane + " مباشرة إلى الطابق المستهدف P" + targetUiFloor + " (" + _chosenSpace.SpaceNumber + ") — تأكيد الحساس " + targetLsTag + " = ON"));
+            _stepFloors.Add(targetUiFloor);
 
             _dynamicSteps.Add(_opType == "PARK"
                 ? Loc.T("Step 2 (Return Park): Closing wall & returning platform (Park_Step2_OK → Step2_Start)...", "المرحلة 2 (Return Park): إغلاق الحاجز وإرجاع المنصة (Park_Step2_OK → Park_IN_Step2_Start)...")

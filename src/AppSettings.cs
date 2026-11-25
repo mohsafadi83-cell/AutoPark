@@ -1315,6 +1315,22 @@ namespace AutoPark
         readonly object _plcCommandLock = new object();
         public volatile bool IsPlcCommandBusy = false;
 
+        public bool CancelLatestActiveRequestOnBackend()
+        {
+            if (string.IsNullOrEmpty(BackendToken)) return false;
+            try
+            {
+                string json = HttpSend("GET", ApiBaseUrl + "/parking/requests?active=true&limit=5", null);
+                if (string.IsNullOrEmpty(json)) return false;
+                var m = Regex.Match(json, "\"id\"\\s*:\\s*\"([^\"]+)\"");
+                if (!m.Success) return false;
+                string reqId = m.Groups[1].Value;
+                HttpSend("POST", ApiBaseUrl + "/parking/requests/" + reqId + "/cancel", "{}");
+                return true;
+            }
+            catch { return false; }
+        }
+
         public string SendRecoveryAction(string action)
         {
             if (string.IsNullOrEmpty(BackendToken)) return "";
