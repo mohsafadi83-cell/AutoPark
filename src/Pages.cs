@@ -806,8 +806,9 @@ namespace AutoPark
                 _lblStepStatus.Text = Loc.T("⬇ Lowering lift to Home Position (Step 2: M10.1=1, DB2,X5.6=0)...", "⬇ جاري إرجاع المصعد للوضع الابتدائي (المرحلة 2: M10.1=1)...");
                 System.Threading.ThreadPool.QueueUserWorkItem(delegate
                 {
-                    // Exact TIA Portal Page 104 Step 2 sequence (sequential via _plcCommandLock):
-                    ps.SendPlcWriteBool("DB1,X0.3", true, 0);        // Auto_DB = 1
+                    // Exact TIA Portal Page 104 Step 2 sequence (sequential via _plcCommandLock; only write Auto_DB if not already ON):
+                    if (!ps.Sensors.AutoMode)
+                        ps.SendPlcWriteBool("DB1,X0.3", true, 0);
                     string r1 = ps.SendPlcWriteBool("M10.1", true, 0);     // SetBit(Park_IN_Step2_Start)
                     string r2 = ps.SendPlcWriteBool("DB2,X5.6", false, 0); // ResetBit(Park_Step2_Ready)
                     if (!IsDisposed && IsHandleCreated)

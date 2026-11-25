@@ -1432,7 +1432,10 @@ namespace AutoPark
         {
             var req = (HttpWebRequest)WebRequest.Create(url);
             req.Method = method;
-            req.Timeout = 5000;
+            bool isWrite = string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(method, "PUT", StringComparison.OrdinalIgnoreCase);
+            req.Timeout = isWrite ? 15000 : 6000;
+            req.ReadWriteTimeout = isWrite ? 15000 : 6000;
             req.ContentType = "application/json; charset=utf-8";
             if (!string.IsNullOrEmpty(BackendToken))
                 req.Headers["Authorization"] = "Bearer " + BackendToken;
