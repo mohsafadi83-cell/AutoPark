@@ -28,6 +28,7 @@ class _ManualPlcControlScreenState
     extends ConsumerState<ManualPlcControlScreen> {
   bool _manualEnabled = false;
   bool _modeBusy = false;
+  bool _cmdBusy = false;
   String? _activeMomentaryKey;
   final Map<String, bool> _toggleStates = <String, bool>{
     'man_pump_tag': false,
@@ -256,8 +257,15 @@ class _ManualPlcControlScreenState
     }
   }
 
+  static const _laneMomentaryKeys = <String>{
+    'man_l1_tag',
+    'man_l2_tag',
+    'man_l3_tag',
+    'man_l4_tag',
+  };
+
   Future<void> _toggleControl(String controlKey, String label, bool isAr) async {
-    if (!_manualEnabled) return;
+    if (!_manualEnabled || _cmdBusy) return;
     final appState = ref.read(appControllerProvider);
     final isEStop = (appState.systemStatus?.emergencyStop ?? false) ||
         (_sensors?['emergencyStop'] == true);
@@ -305,6 +313,7 @@ class _ManualPlcControlScreenState
     final isStopper = _stopperKeys.contains(controlKey);
     final m03State = _hasAnyActiveStopper || (_activeMomentaryKey != null);
 
+    _cmdBusy = true;
     try {
       await notifier.sendManualControl(controlKey, nextState);
       if (isStopper) {
@@ -321,11 +330,13 @@ class _ManualPlcControlScreenState
         isAr ? 'فشل إرسال الأمر اليدوي ($controlKey)' : 'Failed sending manual command ($controlKey)',
         isError: true,
       );
+    } finally {
+      _cmdBusy = false;
     }
   }
 
   Future<void> _startMomentary(String controlKey, String label, bool isAr) async {
-    if (!_manualEnabled) return;
+    if (!_manualEnabled || _cmdBusy) return;
     final appState = ref.read(appControllerProvider);
     final isEStop = (appState.systemStatus?.emergencyStop ?? false) ||
         (_sensors?['emergencyStop'] == true);
@@ -350,36 +361,52 @@ class _ManualPlcControlScreenState
       await _releaseMomentary(_activeMomentaryKey!, _activeMomentaryKey!, isAr);
     }
 
+    final isLane = _laneMomentaryKeys.contains(controlKey);
     setState(() {
+      if (controlKey == 'man_down_tag') {
+        _toggleStates['man_up_tag'] = false;
+        _toggleStates['man_pump_tag'] = false;
+        _toggleStates['man_cutoff_tag'] = false;
+      }
       _activeMomentaryKey = controlKey;
-      _statusLine = isAr
-          ? '🟡 تشغيل لحظي نشط (Hold): $label ($controlKey = 1 + M0.3 + M0.4)'
-          : '🟡 Momentary ACTIVE (Hold): $label ($controlKey = 1 + M0.3 + M0.4)';
+      _statusLine = isLane
+          ? (isAr
+              ? '🟡 تشغيل لحظي نشط (Hold): $label ($controlKey = 1 + M0.3 + M0.4)'
+              : '🟡 Momentary ACTIVE (Hold): $label ($controlKey = 1 + M0.3 + M0.4)')
+          : (isAr
+              ? '🟡 جاري النزول (ضغط مستمر): $label (man_down_tag = 1)'
+              : '🟡 Lowering (Hold): $label (man_down_tag = 1)');
       _statusColor = AppColors.statusWarning;
     });
     HapticFeedback.mediumImpact();
 
     final notifier = ref.read(appControllerProvider.notifier);
+    _cmdBusy = true;
     try {
       await notifier.sendManualControl(controlKey, true);
-      await notifier.writeLivePlcTag('M0.3', true).catchError((_) => const <String, dynamic>{});
-      await notifier.writeLivePlcTag('M0.4', true).catchError((_) => const <String, dynamic>{});
+      if (isLane) {
+        await notifier.writeLivePlcTag('M0.3', true).catchError((_) => const <String, dynamic>{});
+        await notifier.writeLivePlcTag('M0.4', true).catchError((_) => const <String, dynamic>{});
+      }
     } catch (_) {
       if (mounted) {
         await _releaseMomentary(controlKey, label, isAr);
       }
+    } finally {
+      _cmdBusy = false;
     }
   }
 
   Future<void> _releaseMomentary(String controlKey, String label, bool isAr) async {
     if (_activeMomentaryKey != controlKey) return;
+    final isLane = _laneMomentaryKeys.contains(controlKey);
     final keepM03 = _hasAnyActiveStopper;
     if (mounted) {
       setState(() {
         _activeMomentaryKey = null;
         _statusLine = isAr
-            ? '🟢 تم إفلات الزر اللحظي (0): $label (M0.4 = 0)'
-            : '🟢 Momentary released (0): $label (M0.4 = 0)';
+            ? '🟢 تم إفلات الزر اللحظي (0): $label'
+            : '🟢 Momentary released (0): $label';
         _statusColor = AppColors.statusOnline;
       });
     } else {
@@ -388,8 +415,45 @@ class _ManualPlcControlScreenState
 
     final notifier = ref.read(appControllerProvider.notifier);
     await notifier.sendManualControl(controlKey, false).catchError((_) => const <String, dynamic>{});
-    await notifier.writeLivePlcTag('M0.4', false).catchError((_) => const <String, dynamic>{});
-    await notifier.writeLivePlcTag('M0.3', keepM03).catchError((_) => const <String, dynamic>{});
+    if (isLane) {
+      await notifier.writeLivePlcTag('M0.4', false).catchError((_) => const <String, dynamic>{});
+      await notifier.writeLivePlcTag('M0.3', keepM03).catchError((_) => const <String, dynamic>{});
+    }
+  }
+
+  Future<void> _returnLiftToHome(bool isAr) async {
+    if (_cmdBusy || _modeBusy) return;
+    final wasManual = _manualEnabled;
+    setState(() => _cmdBusy = true);
+    try {
+      if (_activeMomentaryKey != null || _hasAnyActiveToggle) {
+        await _releaseAllOutputs(
+          isAr: isAr,
+          reasonEn: 'Returning lift to Home — releasing outputs',
+          reasonAr: 'إرجاع المصعد للوضع الابتدائي — فصل المخارج',
+        );
+      }
+      final notifier = ref.read(appControllerProvider.notifier);
+      await notifier.executeEmergencyRecovery('RETURN_PARK');
+      if (wasManual) {
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        await notifier.sendManualControl('manual_mode_tag', true);
+      }
+      if (!mounted) return;
+      _showToast(
+        wasManual
+            ? (isAr ? '✅ تم إرجاع المصعد للوضع الابتدائي وإعادة الوضع اليدوي' : '✅ Lift returned to Home & Manual Mode restored')
+            : (isAr ? '✅ تم إرجاع المصعد للوضع الابتدائي (Home)' : '✅ Lift returned to Home / Initial Position'),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showToast(
+        isAr ? 'تعذر إرجاع المصعد: $e' : 'Return Home failed: $e',
+        isError: true,
+      );
+    } finally {
+      if (mounted) setState(() => _cmdBusy = false);
+    }
   }
 
   Future<void> _releaseAllOutputs({
@@ -781,24 +845,50 @@ class _ManualPlcControlScreenState
               ],
             ),
             const SizedBox(height: 8),
-            SizedBox(
-              height: 40,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.statusError,
-                  foregroundColor: Colors.white,
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 40,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.accentBlue,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: (_cmdBusy || isEStop || isOffline)
+                          ? null
+                          : () => _returnLiftToHome(isAr),
+                      icon: const Icon(Icons.home_rounded, size: 18),
+                      label: Text(
+                        isAr ? '⬇ إرجاع للوضع الابتدائي' : '⬇ Return Home',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                      ),
+                    ),
+                  ),
                 ),
-                onPressed: () => _releaseAllOutputs(
-                  isAr: isAr,
-                  reasonEn: 'Immediate stop of all manual outputs',
-                  reasonAr: 'إيقاف فوري لجميع المخارج اليدوية',
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SizedBox(
+                    height: 40,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.statusError,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () => _releaseAllOutputs(
+                        isAr: isAr,
+                        reasonEn: 'Immediate stop of all manual outputs',
+                        reasonAr: 'إيقاف فوري لجميع المخارج اليدوية',
+                      ),
+                      icon: const Icon(Icons.stop_circle_rounded, size: 18),
+                      label: Text(
+                        isAr ? '🛑 إيقاف الكل' : '🛑 Stop All',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                      ),
+                    ),
+                  ),
                 ),
-                icon: const Icon(Icons.stop_circle_rounded, size: 18),
-                label: Text(
-                  isAr ? '🛑 إيقاف جميع المخارج فوراً' : '🛑 Stop All Manual Outputs',
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
+              ],
             ),
             const SizedBox(height: 8),
             Text(
@@ -863,10 +953,9 @@ class _ManualPlcControlScreenState
                     enabled,
                     isAr,
                   ),
-                  _toggleBtn(
-                    isAr ? '⬇ نزول (DOWN)' : '⬇ Lift DOWN',
+                  _momentaryBtn(
+                    isAr ? '⬇ نزول (ضغط مستمر)' : '⬇ Lift DOWN (Hold)',
                     'man_down_tag',
-                    const Color(0xFF1E3A8A),
                     enabled,
                     isAr,
                   ),

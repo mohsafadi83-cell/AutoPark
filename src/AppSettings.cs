@@ -1308,64 +1308,87 @@ namespace AutoPark
             Save();
         }
 
+        readonly object _plcCommandLock = new object();
+        public volatile bool IsPlcCommandBusy = false;
+
         public string SendRecoveryAction(string action)
         {
             if (string.IsNullOrEmpty(BackendToken)) return "";
-            try
+            lock (_plcCommandLock)
             {
-                string body = "{\"action\":\"" + EscapeJson(action) + "\"}";
-                return HttpSend("POST", ApiBaseUrl + "/industrial/s7/recovery", body);
-            }
-            catch (Exception ex)
-            {
-                return "ERR:" + ex.Message;
+                IsPlcCommandBusy = true;
+                try
+                {
+                    string body = "{\"action\":\"" + EscapeJson(action) + "\"}";
+                    return HttpSend("POST", ApiBaseUrl + "/industrial/s7/recovery", body);
+                }
+                catch (Exception ex)
+                {
+                    return "ERR:" + ex.Message;
+                }
+                finally { IsPlcCommandBusy = false; }
             }
         }
 
         public string SendManualControl(string controlKey, bool active)
         {
             if (string.IsNullOrEmpty(BackendToken)) return "";
-            try
+            lock (_plcCommandLock)
             {
-                string body = "{\"controlKey\":\"" + EscapeJson(controlKey) + "\",\"active\":" + (active ? "true" : "false") + "}";
-                return HttpSend("POST", ApiBaseUrl + "/industrial/s7/manual", body);
-            }
-            catch (Exception ex)
-            {
-                return "ERR:" + ex.Message;
+                IsPlcCommandBusy = true;
+                try
+                {
+                    string body = "{\"controlKey\":\"" + EscapeJson(controlKey) + "\",\"active\":" + (active ? "true" : "false") + "}";
+                    return HttpSend("POST", ApiBaseUrl + "/industrial/s7/manual", body);
+                }
+                catch (Exception ex)
+                {
+                    return "ERR:" + ex.Message;
+                }
+                finally { IsPlcCommandBusy = false; }
             }
         }
 
         public string SendPlcWrite(string address, int value, int pulseMs)
         {
             if (string.IsNullOrEmpty(BackendToken)) return "";
-            try
+            lock (_plcCommandLock)
             {
-                string body = pulseMs > 0
-                    ? "{\"address\":\"" + EscapeJson(address) + "\",\"value\":" + value + ",\"pulseMs\":" + pulseMs + "}"
-                    : "{\"address\":\"" + EscapeJson(address) + "\",\"value\":" + value + "}";
-                return HttpSend("POST", ApiBaseUrl + "/industrial/s7/write", body);
-            }
-            catch (Exception ex)
-            {
-                return "ERR:" + ex.Message;
+                IsPlcCommandBusy = true;
+                try
+                {
+                    string body = pulseMs > 0
+                        ? "{\"address\":\"" + EscapeJson(address) + "\",\"value\":" + value + ",\"pulseMs\":" + pulseMs + "}"
+                        : "{\"address\":\"" + EscapeJson(address) + "\",\"value\":" + value + "}";
+                    return HttpSend("POST", ApiBaseUrl + "/industrial/s7/write", body);
+                }
+                catch (Exception ex)
+                {
+                    return "ERR:" + ex.Message;
+                }
+                finally { IsPlcCommandBusy = false; }
             }
         }
 
         public string SendPlcWriteBool(string address, bool value, int pulseMs)
         {
             if (string.IsNullOrEmpty(BackendToken)) return "";
-            try
+            lock (_plcCommandLock)
             {
-                string valLit = value ? "true" : "false";
-                string body = pulseMs > 0
-                    ? "{\"address\":\"" + EscapeJson(address) + "\",\"value\":" + valLit + ",\"pulseMs\":" + pulseMs + "}"
-                    : "{\"address\":\"" + EscapeJson(address) + "\",\"value\":" + valLit + "}";
-                return HttpSend("POST", ApiBaseUrl + "/industrial/s7/write", body);
-            }
-            catch (Exception ex)
-            {
-                return "ERR:" + ex.Message;
+                IsPlcCommandBusy = true;
+                try
+                {
+                    string valLit = value ? "true" : "false";
+                    string body = pulseMs > 0
+                        ? "{\"address\":\"" + EscapeJson(address) + "\",\"value\":" + valLit + ",\"pulseMs\":" + pulseMs + "}"
+                        : "{\"address\":\"" + EscapeJson(address) + "\",\"value\":" + valLit + "}";
+                    return HttpSend("POST", ApiBaseUrl + "/industrial/s7/write", body);
+                }
+                catch (Exception ex)
+                {
+                    return "ERR:" + ex.Message;
+                }
+                finally { IsPlcCommandBusy = false; }
             }
         }
 

@@ -762,7 +762,7 @@ namespace AutoPark
 
             var btnReturnGround = new ModernButton
             {
-                Text = Loc.T("⬇ Return Lift to Ground Floor (P1)", "⬇ إرجاع المصعد للطابق الأرضي (الوضع الافتراضي P1)"),
+                Text = Loc.T("⬇ Return Lift to Home (Initial Position)", "⬇ إرجاع المصعد للوضع الابتدائي (Home)"),
                 BaseColor = Theme.Amber,
                 HoverColor = Color.FromArgb(180, 83, 9),
                 ForeColor = Color.White
@@ -771,22 +771,37 @@ namespace AutoPark
             btnReturnGround.Click += delegate
             {
                 var ps = ParkState.Instance;
+                if (ps.IsPlcCommandBusy) return;
                 if (ps.EmergencyStop || ps.Sensors.EmergencyPhysical)
                 {
                     Loc.ShowMsg("Cannot lower lift while Emergency Stop is active!", "لا يمكن إنزال المصعد أثناء تفعيل إيقاف الطوارئ!", "Safety", "أمان", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
+                btnReturnGround.Enabled = false;
                 _lblStepStatus.ForeColor = Theme.Amber;
-                _lblStepStatus.Text = Loc.T("⬇ Returning lift to Ground Floor (P1 — Step 2: M10.1=1, DB2,X5.6=0)...", "⬇ جاري إرجاع المصعد إلى الطابق الأرضي (الوضع الافتراضي P1 — M10.1=1)...");
+                _lblStepStatus.Text = Loc.T("⬇ Returning lift to Home / Initial Position (single command)...", "⬇ جاري إرجاع المصعد إلى الوضع الابتدائي (Home)...");
                 System.Threading.ThreadPool.QueueUserWorkItem(delegate
                 {
-                    ps.SendPlcWriteBool("DB1,X0.3", true, 0);   // Auto_DB = 1
-                    ps.SendPlcWriteBool("M10.1", true, 0);      // SetBit(Park_IN_Step2_Start)
-                    ps.SendPlcWriteBool("DB2,X5.6", false, 0);  // ResetBit(Park_Step2_Ready)
-                    ps.SendRecoveryAction("RETURN_PARK");
+                    string resp = ps.SendRecoveryAction("RETURN_PARK");
+                    if (!IsDisposed && IsHandleCreated)
+                    {
+                        try
+                        {
+                            BeginInvoke((Action)delegate
+                            {
+                                btnReturnGround.Enabled = true;
+                                bool ok = string.IsNullOrEmpty(resp) || !resp.StartsWith("ERR:");
+                                _lblStepStatus.ForeColor = ok ? Theme.Ok : Theme.Err;
+                                _lblStepStatus.Text = ok
+                                    ? Loc.T("✅ Lift returned to Home / Initial Position.", "✅ تم إرجاع المصعد إلى الوضع الابتدائي (Home) بنجاح.")
+                                    : Loc.T("⚠ Return Home failed: " + resp, "⚠ تعذر إرجاع المصعد: " + resp);
+                            });
+                        }
+                        catch { }
+                    }
                 });
-                ps.RecordLocalAudit("RETURN_GROUND_P1", _chosenSpace != null ? _chosenSpace.SpaceNumber : "LIFT",
-                    Loc.T("Return lift to Ground Floor (P1)", "إرجاع المصعد للطابق الأرضي (P1)"), Loc.UserDisplay(_shell.CurrentUser));
+                ps.RecordLocalAudit("RETURN_HOME", _chosenSpace != null ? _chosenSpace.SpaceNumber : "LIFT",
+                    Loc.T("Return lift to Home / Initial Position", "إرجاع المصعد للوضع الابتدائي (Home)"), Loc.UserDisplay(_shell.CurrentUser));
             };
 
             var btnClose = new ModernButton
@@ -1267,12 +1282,13 @@ namespace AutoPark
 
             Loc.ShowMsg(
                 _opType == "PARK"
-                    ? "Vehicle (" + _chosenPlate + ") parked successfully in Bay " + _chosenSpace.SpaceNumber + "!"
+                    ? "Deposit Completed!\n\nVehicle (" + _chosenPlate + ") parked successfully in Bay " + _chosenSpace.SpaceNumber + "!"
                     : "Vehicle (" + _chosenPlate + ") is ready for pickup from Bay " + _chosenSpace.SpaceNumber + "!",
                 _opType == "PARK"
-                    ? "تم إيداع المركبة (" + _chosenPlate + ") بنجاح في المصف " + _chosenSpace.SpaceNumber + " بالتوقف الدقيق عند كل طابق وبتأكيد الـ PLC!"
+                    ? "تم الإيداع بنجاح (Deposit Completed)!\n\nتم إيداع المركبة (" + _chosenPlate + ") في المصف " + _chosenSpace.SpaceNumber + " بتأكيد الـ PLC!"
                     : "المركبة (" + _chosenPlate + ") جاهزة للاستلام عند البوابة من المصف " + _chosenSpace.SpaceNumber + "!",
-                "Operation Completed", "اكتملت العملية بنجاح",
+                _opType == "PARK" ? "Deposit Completed" : "Operation Completed",
+                _opType == "PARK" ? "تم الإيداع بنجاح" : "اكتملت العملية بنجاح",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             Close();
         }

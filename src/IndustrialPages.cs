@@ -1107,6 +1107,14 @@ namespace AutoPark
                 _btnToggleMatrix.BaseColor = _matrixDrawer.Visible ? Theme.Primary : Color.FromArgb(71, 85, 105);
             };
 
+            var btnReturnHome = new ModernButton
+            {
+                Text = Loc.T("⬇ Home", "⬇ إرجاع للوضع الابتدائي"),
+                BaseColor = Theme.Blue,
+                HoverColor = Color.FromArgb(29, 78, 216)
+            };
+            btnReturnHome.Click += delegate { ReturnLiftToHomeAndRestoreMode(btnReturnHome); };
+
             var btnStopAll = new ModernButton
             {
                 Text = Loc.T("🛑 Stop All", "🛑 إيقاف الكل"),
@@ -1123,11 +1131,12 @@ namespace AutoPark
             _lblStatus.Dock = DockStyle.Fill;
 
             modeBar.Controls.Add(_lblStatus);
-            modeBar.Controls.Add(Theme.Holder(_btnModeManual, startDock, 145, new Padding(4, 2, 4, 2)));
-            modeBar.Controls.Add(Theme.Holder(_btnModeAuto, startDock, 135, new Padding(4, 2, 4, 2)));
-            modeBar.Controls.Add(Theme.Holder(_btnToggleSlots, startDock, 135, new Padding(4, 2, 4, 2)));
-            modeBar.Controls.Add(Theme.Holder(_btnToggleMatrix, startDock, 145, new Padding(4, 2, 4, 2)));
-            modeBar.Controls.Add(Theme.Holder(btnStopAll, endDock, 135, new Padding(4, 2, 4, 2)));
+            modeBar.Controls.Add(Theme.Holder(_btnModeManual, startDock, 130, new Padding(3, 2, 3, 2)));
+            modeBar.Controls.Add(Theme.Holder(_btnModeAuto, startDock, 120, new Padding(3, 2, 3, 2)));
+            modeBar.Controls.Add(Theme.Holder(_btnToggleSlots, startDock, 125, new Padding(3, 2, 3, 2)));
+            modeBar.Controls.Add(Theme.Holder(_btnToggleMatrix, startDock, 130, new Padding(3, 2, 3, 2)));
+            modeBar.Controls.Add(Theme.Holder(btnReturnHome, endDock, 125, new Padding(3, 2, 3, 2)));
+            modeBar.Controls.Add(Theme.Holder(btnStopAll, endDock, 120, new Padding(3, 2, 3, 2)));
 
             // Zero-scroll main split: LEFT = Direct Manual Controls | RIGHT = Modern Geometric Live Status Monitor (Always Enabled)
             var mainWorkspace = new Panel { Dock = DockStyle.Top, Height = 380 };
@@ -1162,7 +1171,7 @@ namespace AutoPark
 
             holdGrid.Controls.Add(MakeToggleButton(Loc.T("⚡ Pump", "⚡ المضخة (Pump)"), "man_pump_tag", Theme.Primary), 0, 0);
             holdGrid.Controls.Add(MakeToggleButton(Loc.T("⬆ Lift UP", "⬆ صعود (UP)"), "man_up_tag", Theme.Blue), 1, 0);
-            holdGrid.Controls.Add(MakeToggleButton(Loc.T("⬇ Lift DOWN", "⬇ نزول (DOWN)"), "man_down_tag", Color.FromArgb(30, 64, 175)), 2, 0);
+            holdGrid.Controls.Add(MakeMomentaryButton(Loc.T("⬇ Lift DOWN (Hold)", "⬇ نزول (ضغط مستمر)"), "man_down_tag", Color.FromArgb(30, 64, 175)), 2, 0);
             holdGrid.Controls.Add(MakeToggleButton(Loc.T("🧱 Wall Valve", "🧱 الحاجز (Wall)"), "man_wall_tag", Theme.Purple), 3, 0);
 
             holdGrid.Controls.Add(MakeToggleButton(Loc.T("🔧 Cutoff Valve", "🔧 صمام القطع (Cutoff)"), "man_cutoff_tag", Theme.Ink), 0, 1);
@@ -1305,21 +1314,43 @@ namespace AutoPark
             return btn;
         }
 
+        static bool IsLaneMomentaryKey(string controlKey)
+        {
+            return string.Equals(controlKey, "man_l1_tag", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(controlKey, "man_l2_tag", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(controlKey, "man_l3_tag", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(controlKey, "man_l4_tag", StringComparison.OrdinalIgnoreCase);
+        }
+
         void StartMomentary(string controlKey, string label)
         {
             if (_activeMomentaryKey != null && _activeMomentaryKey != controlKey)
-                ReleaseMomentary(_activeMomentaryKey, Loc.T("Switching lane", "تبديل مسار"));
+                ReleaseMomentary(_activeMomentaryKey, Loc.T("Switching control", "تبديل التحكم"));
+
+            bool isLane = IsLaneMomentaryKey(controlKey);
+            if (string.Equals(controlKey, "man_down_tag", StringComparison.OrdinalIgnoreCase))
+            {
+                UpdateToggleVisual("man_up_tag", false);
+                UpdateToggleVisual("man_pump_tag", false);
+                UpdateToggleVisual("man_cutoff_tag", false);
+            }
 
             _activeMomentaryKey = controlKey;
-            _lblStatus.Text = Loc.T("🟡 Momentary active (Hold): ", "🟡 تشغيل لحظي نشط (Momentary): ") + label + " (" + controlKey + " = 1 + Accept_action_manual M0.4 = 1)";
+            _lblStatus.Text = isLane
+                ? Loc.T("🟡 Hold Active: ", "🟡 ضغط مستمر نشط: ") + label + " (" + controlKey + " = 1 + M0.4 = 1)"
+                : Loc.T("🟡 Lowering (Hold): ", "🟡 جاري النزول (ضغط مستمر): ") + label + " (man_down_tag = 1)";
             _lblStatus.ForeColor = Theme.Amber;
 
             string keyCopy = controlKey;
+            bool laneCopy = isLane;
             ThreadPool.QueueUserWorkItem(delegate
             {
                 ParkState.Instance.SendManualControl(keyCopy, true);
-                ParkState.Instance.SendPlcWriteBool("M0.3", true, 0);
-                ParkState.Instance.SendPlcWriteBool("M0.4", true, 0);
+                if (laneCopy)
+                {
+                    ParkState.Instance.SendPlcWriteBool("M0.3", true, 0);
+                    ParkState.Instance.SendPlcWriteBool("M0.4", true, 0);
+                }
             });
         }
 
@@ -1327,19 +1358,78 @@ namespace AutoPark
         {
             if (_activeMomentaryKey != controlKey && controlKey != null) return;
             _activeMomentaryKey = null;
+            bool isLane = IsLaneMomentaryKey(controlKey);
             bool keepManualActionHigh = HasAnyActiveStopper();
-            _lblStatus.Text = Loc.T("🟢 Momentary released (ResetBit = 0): ", "🟢 تم إفلات الزر اللحظي (ResetBit = 0): ") + label + " (Accept_action_manual M0.4 = 0)";
+            _lblStatus.Text = Loc.T("🟢 Released (0): ", "🟢 تم الإفلات (0): ") + label;
             _lblStatus.ForeColor = Theme.Ok;
 
             string keyCopy = controlKey;
             string lblCopy = label;
             bool keepM03 = keepManualActionHigh;
+            bool laneCopy = isLane;
             ParkState.Instance.RecordLocalAudit("MANUAL_MOMENTARY", keyCopy, lblCopy, Loc.UserDisplay(_shell.CurrentUser));
             ThreadPool.QueueUserWorkItem(delegate
             {
                 ParkState.Instance.SendManualControl(keyCopy, false);
-                ParkState.Instance.SendPlcWriteBool("M0.4", false, 0);
-                ParkState.Instance.SendPlcWriteBool("M0.3", keepM03, 0);
+                if (laneCopy)
+                {
+                    ParkState.Instance.SendPlcWriteBool("M0.4", false, 0);
+                    ParkState.Instance.SendPlcWriteBool("M0.3", keepM03, 0);
+                }
+            });
+        }
+
+        void ReturnLiftToHomeAndRestoreMode(ModernButton btn)
+        {
+            var ps = ParkState.Instance;
+            if (ps.IsPlcCommandBusy)
+            {
+                _lblStatus.Text = Loc.T("⏳ Another PLC command is running — please wait.", "⏳ يوجد أمر قيد التنفيذ على الـ PLC — يرجى الانتظار.");
+                _lblStatus.ForeColor = Theme.Amber;
+                return;
+            }
+            if (ps.EmergencyStop || ps.Sensors.EmergencyPhysical)
+            {
+                _lblStatus.Text = Loc.T("🔴 Blocked: Emergency Stop is active!", "🔴 ممنوع: إيقاف الطوارئ مفعّل!");
+                _lblStatus.ForeColor = Theme.Err;
+                return;
+            }
+            bool wasManual = _manualEnabled;
+            if (_activeMomentaryKey != null || HasAnyActiveToggle())
+                ReleaseAllOutputs(Loc.T("Returning lift to Home — releasing outputs", "إرجاع المصعد للوضع الابتدائي — فصل المخارج"));
+
+            btn.Enabled = false;
+            _lblStatus.Text = Loc.T("⬇ Returning lift to Home / Initial Position...", "⬇ جاري إرجاع المصعد إلى الوضع الابتدائي (Home)...");
+            _lblStatus.ForeColor = Theme.Amber;
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                string resp = ps.SendRecoveryAction("RETURN_PARK");
+                if (wasManual)
+                {
+                    System.Threading.Thread.Sleep(600);
+                    ps.SendManualControl("manual_mode_tag", true);
+                }
+                ps.PullSensorsFromBackend();
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    try
+                    {
+                        BeginInvoke((Action)delegate
+                        {
+                            btn.Enabled = true;
+                            bool ok = string.IsNullOrEmpty(resp) || !resp.StartsWith("ERR:");
+                            _lblStatus.ForeColor = ok ? Theme.Ok : Theme.Err;
+                            _lblStatus.Text = ok
+                                ? (wasManual
+                                    ? Loc.T("✅ Lift returned to Home & Manual Mode restored.", "✅ تم إرجاع المصعد للوضع الابتدائي وإعادة الوضع اليدوي.")
+                                    : Loc.T("✅ Lift returned to Home / Initial Position.", "✅ تم إرجاع المصعد للوضع الابتدائي بنجاح."))
+                                : Loc.T("⚠ Return Home failed: " + resp, "⚠ تعذر إرجاع المصعد: " + resp);
+                            if (_liveMonitor != null) _liveMonitor.RenderNow();
+                        });
+                    }
+                    catch { }
+                }
             });
         }
 
