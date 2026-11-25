@@ -97,10 +97,6 @@ namespace AutoPark
             btnManual.Enabled = shell.CurrentUser.CanMaintenance && !isRestrictedEmployee;
             btnManual.Click += delegate { shell.Navigate(new ManualMaintenancePage(shell), Loc.T("Manual Controls & Live Sensors", "التحكم اليدوي والحساسات الحية")); };
 
-            var btnVehicles = MakeActionBtn(Loc.T("Vehicles", "المركبات"), Icons.Car, Theme.Surface, Theme.SurfaceHover, 96, true);
-            btnVehicles.Enabled = !isRestrictedEmployee;
-            btnVehicles.Click += delegate { shell.Navigate(new VehiclesPage(shell), Loc.T("Registered Vehicles Management", "إدارة المركبات المسجلة — الأردن")); };
-
             var btnAlarms = MakeActionBtn(Loc.T("Alarms", "التنبيهات"), Icons.Warning, Theme.Surface, Theme.SurfaceHover, 94, true);
             btnAlarms.Enabled = !isRestrictedEmployee;
             btnAlarms.Click += delegate { shell.Navigate(new AlarmsPage(shell), Loc.T("Industrial Alarms & Faults", "التنبيهات والأعطال الصناعية")); };
@@ -133,7 +129,6 @@ namespace AutoPark
             if (!isRestrictedEmployee)
             {
                 addNav(btnManual, 142);
-                addNav(btnVehicles, 96);
                 addNav(btnAlarms, 94);
                 addNav(btnHistory, 96);
                 addNav(btnDevices, 110);
@@ -475,32 +470,25 @@ namespace AutoPark
             string parkedBy = (sp.ParkedByUsername ?? "").ToLowerInvariant();
             bool parkedByMe = !string.IsNullOrEmpty(parkedBy) && parkedBy == me;
 
-            if (!parkedByMe && !string.IsNullOrEmpty(sp.PlateNumber) && string.IsNullOrEmpty(parkedBy))
-            {
-                var vCheck = ParkState.Instance.Vehicles.Find(v => v.PlateNumber == sp.PlateNumber);
-                if (vCheck != null && (vCheck.OwnerUsername ?? "").ToLowerInvariant() == me)
-                    parkedByMe = true;
-            }
-
             if (sp.Status == "OCCUPIED" || sp.Status == "RESERVED")
             {
                 if (parkedByMe && !sp.IsOtherVehicle)
                 {
                     accent = Color.FromArgb(202, 138, 4);
                     cardFill = Color.FromArgb(254, 249, 195);
-                    statusTxt = Loc.T("🟡 Your Personal Car (Moved by You)", "🟡 سيارتك الشخصية (أنت حرّكت البارك)");
+                    statusTxt = Loc.T("🟡 Occupied — By You", "🟡 مشغول — بواسطتك");
                 }
                 else if (parkedByMe && sp.IsOtherVehicle)
                 {
                     accent = Theme.Purple;
                     cardFill = Color.FromArgb(243, 232, 255);
-                    statusTxt = Loc.T("🟣 Other Car (Moved by You)", "🟣 سيارة أخرى (أنت حرّكت البارك)");
+                    statusTxt = Loc.T("🟣 Occupied — Moved by You", "🟣 مشغول — حرّكته أنت");
                 }
                 else
                 {
                     accent = Theme.Err;
                     cardFill = Theme.ErrSoft;
-                    statusTxt = Loc.T("🔴 Reserved — Colleague's Car", "🔴 محجوز — سيارة زميل");
+                    statusTxt = Loc.T("🔴 Occupied — Reserved", "🔴 مشغول — محجوز");
                 }
             }
             else if (sp.Status == "MOVING")
@@ -536,12 +524,18 @@ namespace AutoPark
             lblStatus.Dock = DockStyle.Top;
             lblStatus.Height = 22;
 
-            string plateInfo = string.IsNullOrEmpty(sp.PlateNumber)
-                ? Loc.T("No vehicle (Click to Park)", "لا توجد مركبة (اضغط لإيداع مركبة)")
-                : "🚗 " + Loc.T("Plate: ", "اللوحة: ") + sp.PlateNumber + (string.IsNullOrEmpty(sp.OwnerName) ? "" : " — " + sp.OwnerName);
+            string bayActionInfo;
+            if (sp.Status == "AVAILABLE")
+                bayActionInfo = Loc.T("Empty Bay (Click to Park)", "مصف فارغ (اضغط للإيداع)");
+            else if (sp.Status == "OCCUPIED" || sp.Status == "RESERVED")
+                bayActionInfo = Loc.T("Occupied (Click to Retrieve)", "مصف مشغول (اضغط للاسترجاع)");
+            else if (sp.Status == "MOVING")
+                bayActionInfo = Loc.T("Lift Moving...", "المصعد قيد الحركة...");
+            else
+                bayActionInfo = Loc.T("Bay " + sp.SpaceNumber, "المصف " + sp.SpaceNumber);
 
-            var lblPlate = Theme.Label(plateInfo, Theme.Bold(9.8f), string.IsNullOrEmpty(sp.PlateNumber) ? Theme.Muted : Theme.Ink);
-            lblPlate.Dock = DockStyle.Fill;
+            var lblBayInfo = Theme.Label(bayActionInfo, Theme.Bold(9.5f), sp.Status == "AVAILABLE" ? Theme.Muted : Theme.Ink);
+            lblBayInfo.Dock = DockStyle.Fill;
 
             EventHandler onClick = delegate
             {
@@ -557,9 +551,9 @@ namespace AutoPark
             card.Click += onClick;
             lblNum.Click += onClick;
             lblStatus.Click += onClick;
-            lblPlate.Click += onClick;
+            lblBayInfo.Click += onClick;
 
-            card.Controls.Add(lblPlate);
+            card.Controls.Add(lblBayInfo);
             card.Controls.Add(lblStatus);
             card.Controls.Add(lblNum);
             return card;
@@ -597,10 +591,8 @@ namespace AutoPark
         readonly MainForm _shell;
         readonly string _opType;
         readonly SpaceItem _targetSpace;
-        readonly ComboBox _cmbVehicle;
-        readonly TextBox _txtPlate;
-        readonly RadioButton _radMyCar;
-        readonly RadioButton _radOtherCar;
+        readonly ComboBox _cmbBay;
+        readonly List<SpaceItem> _selectableBays = new List<SpaceItem>();
         readonly Label _lblStepStatus;
         readonly Label _lblElevatorPos;
         readonly ProgressBar _progress;
@@ -632,9 +624,9 @@ namespace AutoPark
 
             Theme.PrepareForm(this);
             Text = opType == "PARK"
-                ? Loc.T("Park Vehicle Request (2-Step PLC)", "طلب إيداع مركبة (Park Vehicle — 2-Step PLC)")
-                : Loc.T("Retrieve Vehicle Request (2-Step PLC)", "طلب استرجاع مركبة (Retrieve Vehicle — 2-Step PLC)");
-            ClientSize = new Size(640, 520);
+                ? Loc.T("Park Request — Select Bay (2-Step PLC)", "طلب إيداع — اختيار المصف (2-Step PLC)")
+                : Loc.T("Retrieve Request — Select Bay (2-Step PLC)", "طلب استرجاع — اختيار المصف (2-Step PLC)");
+            ClientSize = new Size(640, 420);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -643,107 +635,53 @@ namespace AutoPark
 
             var title = Theme.Label(
                 opType == "PARK"
-                    ? Loc.T("Park Vehicle", "إيداع مركبة في المواقف الآلية") + (preselectedSpace != null ? " — " + preselectedSpace.SpaceNumber : "")
-                    : Loc.T("Retrieve Vehicle", "استرجاع مركبة من المواقف الآلية") + (preselectedSpace != null ? " — " + preselectedSpace.SpaceNumber : ""),
+                    ? Loc.T("Park in Bay", "إيداع في المواقف الآلية") + (preselectedSpace != null ? " — " + preselectedSpace.SpaceNumber : "")
+                    : Loc.T("Retrieve from Bay", "استرجاع من المواقف الآلية") + (preselectedSpace != null ? " — " + preselectedSpace.SpaceNumber : ""),
                 Theme.Bold(14.5f), Theme.Ink);
             title.SetBounds(22, 16, 560, 32);
 
-            var lblSelect = Theme.Label(Loc.T("Select a registered vehicle (or enter plate number below):", "اختر المركبة المسجلة (أو أدخل رقم اللوحة الأردنية):"), Theme.Semi(10f), Theme.Ink);
+            var lblSelect = Theme.Label(
+                opType == "PARK"
+                    ? Loc.T("Select Target Empty Bay (L11 – L43):", "اختر المصف الفارغ المستهدف (L11 – L43):")
+                    : Loc.T("Select Occupied Bay to Retrieve (L11 – L43):", "اختر المصف المشغول للاسترجاع (L11 – L43):"),
+                Theme.Semi(10f), Theme.Ink);
             lblSelect.SetBounds(22, 56, 560, 24);
 
-            _cmbVehicle = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Font = Theme.F(10.5f) };
-            _cmbVehicle.SetBounds(22, 84, 560, 34);
+            _cmbBay = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Font = Theme.F(10.5f) };
+            _cmbBay.SetBounds(22, 84, 560, 34);
 
             var st = ParkState.Instance;
-            if (opType == "PARK")
+            var sortedSpaces = new List<SpaceItem>(st.Spaces);
+            sortedSpaces.Sort((a, b) =>
             {
-                foreach (var v in st.Vehicles)
-                {
-                    bool alreadyParked = st.Spaces.Exists(s => s.PlateNumber == v.PlateNumber && s.Status == "OCCUPIED");
-                    if (!alreadyParked)
-                        _cmbVehicle.Items.Add(v.PlateNumber + " — " + v.Brand + " " + v.Model + (string.IsNullOrEmpty(v.OwnerName) ? "" : " (" + v.OwnerName + ")"));
-                }
+                int cmp = a.ColumnNumber.CompareTo(b.ColumnNumber);
+                return cmp != 0 ? cmp : a.PositionInColumn.CompareTo(b.PositionInColumn);
+            });
+
+            foreach (var s in sortedSpaces)
+            {
+                bool match = (opType == "PARK") ? (s.Status == "AVAILABLE") : (s.Status == "OCCUPIED");
+                if (!match) continue;
+                _selectableBays.Add(s);
+                string floorLabel = s.PositionInColumn == 1
+                    ? Loc.T("Top · P1 (Level 1)", "علوي · P1 (Level 1)")
+                    : (s.PositionInColumn == 2
+                        ? Loc.T("Mid · P2 (Level 2)", "أوسط · P2 (Level 2)")
+                        : Loc.T("Bottom · P3 (Level 3)", "سفلي · P3 (Level 3)"));
+                int idx = _cmbBay.Items.Add(s.SpaceNumber + " — " + Loc.T("Lane " + s.ColumnNumber, "المسار " + s.ColumnNumber) + " · " + floorLabel);
+                if (preselectedSpace != null && string.Equals(preselectedSpace.SpaceNumber, s.SpaceNumber, StringComparison.OrdinalIgnoreCase))
+                    _cmbBay.SelectedIndex = idx;
             }
-            else
-            {
-                foreach (var s in st.Spaces)
-                {
-                    if (s.Status == "OCCUPIED" && !string.IsNullOrEmpty(s.PlateNumber))
-                    {
-                        int idx = _cmbVehicle.Items.Add(s.PlateNumber + " — " + Loc.T("Bay ", "موجود في مصف ") + s.SpaceNumber + (string.IsNullOrEmpty(s.OwnerName) ? "" : " (" + s.OwnerName + ")"));
-                        if (preselectedSpace != null && preselectedSpace.SpaceNumber == s.SpaceNumber)
-                            _cmbVehicle.SelectedIndex = idx;
-                    }
-                }
-            }
-            if (_cmbVehicle.Items.Count > 0 && _cmbVehicle.SelectedIndex < 0) _cmbVehicle.SelectedIndex = 0;
-
-            var lblManual = Theme.Label(Loc.T("Or enter plate number manually (e.g. 10-45821):", "أو أدخل رقم اللوحة الأردنية يدوياً (مثال: 10-45821):"), Theme.Semi(10f), Theme.Ink);
-            lblManual.SetBounds(22, 128, 560, 24);
-
-            _txtPlate = new TextBox { Font = Theme.F(11f) };
-            _txtPlate.SetBounds(22, 154, 560, 32);
-            if (preselectedSpace != null && !string.IsNullOrEmpty(preselectedSpace.PlateNumber))
-                _txtPlate.Text = preselectedSpace.PlateNumber;
-
-            _radMyCar = new RadioButton
-            {
-                Text = Loc.T("🟡 My Personal Car (Yellow)", "🟡 سيارتي الشخصية (أصفر)"),
-                Checked = true,
-                AutoSize = true,
-                Font = Theme.Bold(9.5f),
-                ForeColor = Color.FromArgb(161, 98, 7),
-                Visible = (opType == "PARK")
-            };
-            _radMyCar.SetBounds(Loc.IsArabic ? 310 : 22, 194, 260, 26);
-
-            _radOtherCar = new RadioButton
-            {
-                Text = Loc.T("🟣 Other / Guest Car (Purple)", "🟣 سيارة أخرى / زائر أو زميل (نهدي)"),
-                Checked = false,
-                AutoSize = true,
-                Font = Theme.Bold(9.5f),
-                ForeColor = Theme.Purple,
-                Visible = (opType == "PARK")
-            };
-            _radOtherCar.SetBounds(Loc.IsArabic ? 22 : 300, 194, 275, 26);
-
-            _cmbVehicle.SelectedIndexChanged += delegate
-            {
-                if (_opType != "PARK" || _cmbVehicle.SelectedItem == null) return;
-                string txt = _cmbVehicle.SelectedItem.ToString();
-                int dash = txt.IndexOf(" — ");
-                string pl = dash > 0 ? txt.Substring(0, dash).Trim() : txt;
-                var vObj = ParkState.Instance.Vehicles.Find(v => v.PlateNumber == pl);
-                if (vObj != null)
-                {
-                    bool mine = string.Equals(vObj.OwnerUsername, _shell.CurrentUser.Username, StringComparison.OrdinalIgnoreCase);
-                    _radMyCar.Checked = mine;
-                    _radOtherCar.Checked = !mine;
-                }
-            };
-            if (opType == "PARK" && _cmbVehicle.SelectedIndex >= 0)
-            {
-                string txt0 = _cmbVehicle.SelectedItem.ToString();
-                int d0 = txt0.IndexOf(" — ");
-                string pl0 = d0 > 0 ? txt0.Substring(0, d0).Trim() : txt0;
-                var v0 = st.Vehicles.Find(v => v.PlateNumber == pl0);
-                if (v0 != null)
-                {
-                    bool mine0 = string.Equals(v0.OwnerUsername, _shell.CurrentUser.Username, StringComparison.OrdinalIgnoreCase);
-                    _radMyCar.Checked = mine0;
-                    _radOtherCar.Checked = !mine0;
-                }
-            }
+            if (_cmbBay.Items.Count > 0 && _cmbBay.SelectedIndex < 0) _cmbBay.SelectedIndex = 0;
 
             _lblElevatorPos = Theme.Label(Loc.T("Safety & Entrance Sensors: Ready for Pre-Check", "حالة حساسات الأمان والمدخل: جاهز للفحص المسبق (Pre-Check)"), Theme.Semi(9.5f), Theme.Ok);
-            _lblElevatorPos.SetBounds(22, 228, 560, 24);
+            _lblElevatorPos.SetBounds(22, 130, 560, 24);
 
             _lblStepStatus = Theme.Label(Loc.T("Ready to run 2-Step PLC Sequence (Step 1: Get Park → Step 2: Return Park).", "جاهز لتنفيذ تسلسل الـ PLC من مرحلتين (Step 1: Get Park → Step 2: Return Park)."), Theme.Semi(10f), Theme.Primary);
-            _lblStepStatus.SetBounds(22, 258, 560, 56);
+            _lblStepStatus.SetBounds(22, 160, 560, 56);
 
             _progress = new ProgressBar { Minimum = 0, Maximum = 8, Value = 0 };
-            _progress.SetBounds(22, 322, 560, 24);
+            _progress.SetBounds(22, 224, 560, 24);
 
             _btnExecute = new ModernButton
             {
@@ -752,7 +690,7 @@ namespace AutoPark
                 BaseColor = opType == "PARK" ? Theme.Primary : Theme.Blue,
                 HoverColor = opType == "PARK" ? Theme.PrimaryHover : Color.FromArgb(29, 78, 216)
             };
-            _btnExecute.SetBounds(22, 368, 360, 46);
+            _btnExecute.SetBounds(22, 270, 360, 46);
             _btnExecute.Click += StartWorkflow;
 
             _btnCancelStep = new ModernButton
@@ -763,7 +701,7 @@ namespace AutoPark
                 ForeColor = Color.White,
                 Enabled = true
             };
-            _btnCancelStep.SetBounds(394, 368, 188, 46);
+            _btnCancelStep.SetBounds(394, 270, 188, 46);
             _btnCancelStep.Click += delegate
             {
                 var ps = ParkState.Instance;
@@ -817,7 +755,7 @@ namespace AutoPark
                 ForeColor = Color.White,
                 Enabled = true
             };
-            _btnReturnGround.SetBounds(22, 424, 290, 40);
+            _btnReturnGround.SetBounds(22, 326, 290, 40);
             _btnReturnGround.Click += delegate
             {
                 var ps = ParkState.Instance;
@@ -865,7 +803,7 @@ namespace AutoPark
                 HoverColor = Color.FromArgb(29, 78, 216),
                 ForeColor = Color.White
             };
-            _btnPauseTimer.SetBounds(318, 424, 130, 40);
+            _btnPauseTimer.SetBounds(318, 326, 130, 40);
             _btnPauseTimer.Click += delegate
             {
                 var ps = ParkState.Instance;
@@ -933,10 +871,10 @@ namespace AutoPark
                 ForeColor = Theme.Ink,
                 BorderColor = Theme.Border
             };
-            btnClose.SetBounds(454, 424, 128, 40);
+            btnClose.SetBounds(454, 326, 128, 40);
             btnClose.Click += delegate { Close(); };
 
-            card.Controls.AddRange(new Control[] { title, lblSelect, _cmbVehicle, lblManual, _txtPlate, _radMyCar, _radOtherCar, _lblElevatorPos, _lblStepStatus, _progress, _btnExecute, _btnCancelStep, _btnReturnGround, _btnPauseTimer, btnClose });
+            card.Controls.AddRange(new Control[] { title, lblSelect, _cmbBay, _lblElevatorPos, _lblStepStatus, _progress, _btnExecute, _btnCancelStep, _btnReturnGround, _btnPauseTimer, btnClose });
             Controls.Add(card);
 
             _timer = new Timer { Interval = 750 };
@@ -995,67 +933,37 @@ namespace AutoPark
                 return;
             }
 
-            string manual = _txtPlate.Text.Trim().ToUpperInvariant();
-            if (!string.IsNullOrEmpty(manual)) _chosenPlate = manual;
-            else if (_cmbVehicle.SelectedItem != null)
-            {
-                string item = _cmbVehicle.SelectedItem.ToString();
-                int dash = item.IndexOf(" — ");
-                _chosenPlate = dash > 0 ? item.Substring(0, dash).Trim() : item;
-            }
-
-            if (string.IsNullOrEmpty(_chosenPlate))
-            {
-                if (_targetSpace != null)
-                {
-                    _chosenPlate = !string.IsNullOrEmpty(_targetSpace.PlateNumber)
-                        ? _targetSpace.PlateNumber
-                        : ("BAY-" + _targetSpace.SpaceNumber);
-                }
-                else
-                {
-                    _chosenPlate = "AUTO-" + DateTime.Now.ToString("HHmmss");
-                }
-            }
+            SpaceItem selectedFromCombo = (_cmbBay.SelectedIndex >= 0 && _cmbBay.SelectedIndex < _selectableBays.Count)
+                ? _selectableBays[_cmbBay.SelectedIndex]
+                : null;
 
             if (_opType == "PARK")
             {
-                if (st.Spaces.Exists(s => s.PlateNumber == _chosenPlate && s.Status == "OCCUPIED"))
-                {
-                    Loc.ShowMsg("Vehicle " + _chosenPlate + " is already parked!", "المركبة " + _chosenPlate + " مصفوفة بالفعل داخل النظام!", "Rejected", "رفض الأمر", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
-                }
-                if (_targetSpace != null)
-                {
-                    if (_targetSpace.Status != "AVAILABLE")
-                    {
-                        Loc.ShowMsg("Bay " + _targetSpace.SpaceNumber + " is not available right now (" + _targetSpace.Status + ").", "المصف " + _targetSpace.SpaceNumber + " غير متاح حالياً (" + _targetSpace.Status + ").", "Notice", "تنبيه", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        return;
-                    }
-                    _chosenSpace = _targetSpace;
-                }
-                else
-                {
-                    _chosenSpace = st.Spaces.Find(s => s.Status == "AVAILABLE");
-                }
-
+                _chosenSpace = selectedFromCombo ?? _targetSpace ?? st.Spaces.Find(s => s.Status == "AVAILABLE");
                 if (_chosenSpace == null)
                 {
                     Loc.ShowMsg("No available parking bays (all 12 bays are occupied).", "لا توجد أي مصفات متاحة حالياً (جميع المصفات الـ 12 مشغولة).", "Garage Full", "المواقف ممتلئة", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
+                if (_chosenSpace.Status != "AVAILABLE")
+                {
+                    Loc.ShowMsg("Bay " + _chosenSpace.SpaceNumber + " is not available right now (" + _chosenSpace.Status + ").", "المصف " + _chosenSpace.SpaceNumber + " غير متاح حالياً (" + _chosenSpace.Status + ").", "Notice", "تنبيه", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                // Internal bay identifier for backend compatibility only (never entered or shown to user)
+                _chosenPlate = "BAY-" + _chosenSpace.SpaceNumber;
             }
             else
             {
-                _chosenSpace = _targetSpace != null && _targetSpace.Status == "OCCUPIED"
-                    ? _targetSpace
-                    : st.Spaces.Find(s => s.PlateNumber == _chosenPlate && s.Status == "OCCUPIED");
-
+                _chosenSpace = selectedFromCombo ?? (_targetSpace != null && _targetSpace.Status == "OCCUPIED" ? _targetSpace : st.Spaces.Find(s => s.Status == "OCCUPIED"));
                 if (_chosenSpace == null)
                 {
-                    Loc.ShowMsg("Vehicle " + _chosenPlate + " is not currently parked in any bay.", "المركبة " + _chosenPlate + " غير موجودة في أي مصف حالياً.", "Notice", "تنبيه", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    Loc.ShowMsg("No occupied bays found for retrieval.", "لا توجد أي مصفات مشغولة للاسترجاع حالياً.", "Notice", "تنبيه", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
+                _chosenPlate = !string.IsNullOrEmpty(_chosenSpace.PlateNumber)
+                    ? _chosenSpace.PlateNumber
+                    : ("BAY-" + _chosenSpace.SpaceNumber);
             }
 
             int lane = _chosenSpace.ColumnNumber;
@@ -1075,13 +983,11 @@ namespace AutoPark
 
             var confirm = Loc.ShowMsg(
                 "Confirm Industrial PLC Operation (2-Step Sequence):\n\n" +
-                "• Operation: " + (_opType == "PARK" ? "Park Vehicle (PARK IN)" : "Retrieve Vehicle (PARK OUT)") + "\n" +
-                "• Plate Number: " + _chosenPlate + "\n" +
+                "• Operation: " + (_opType == "PARK" ? "Park (PARK IN)" : "Retrieve (PARK OUT)") + "\n" +
                 "• Target Bay: " + _chosenSpace.SpaceNumber + " — Lane " + lane + " — " + floorName + "\n" +
                 "• Lift Path: P" + startFloor + " → P" + targetUiFloor + "\n\nSend command to S7-1200 PLC?",
                 "تأكيد العملية الصناعية (تسلسل الـ PLC من مرحلتين):\n\n" +
-                "• نوع العملية: " + (_opType == "PARK" ? "إيداع مركبة (PARK IN)" : "استرجاع مركبة (PARK OUT)") + "\n" +
-                "• رقم اللوحة: " + _chosenPlate + "\n" +
+                "• نوع العملية: " + (_opType == "PARK" ? "إيداع (PARK IN)" : "استرجاع (PARK OUT)") + "\n" +
                 "• المصف المستهدف: " + _chosenSpace.SpaceNumber + " — المسار " + lane + " — " + floorName + "\n" +
                 "• موضع المصعد الحالي: P" + startFloor + " ← الهدف: P" + targetUiFloor + "\n\nهل تريد إرسال الأمر إلى المتحكم الصناعي (S7-1200 PLC)؟",
                 "Safety Confirmation", "تأكيد الأمان قبل الإرسال",
@@ -1107,12 +1013,12 @@ namespace AutoPark
 
             _dynamicSteps.Add(_opType == "PARK"
                 ? Loc.T("Step 2 (Return Park): Closing wall & returning platform (Park_Step2_OK → Step2_Start)...", "المرحلة 2 (Return Park): إغلاق الحاجز وإرجاع المنصة (Park_Step2_OK → Park_IN_Step2_Start)...")
-                : Loc.T("Step 2 (Exit Ready): Securing gate & delivering vehicle to exit...", "المرحلة 2 (Exit Ready): تأمين البوابة وإخراج المركبة للاستلام..."));
+                : Loc.T("Step 2 (Exit Ready): Securing gate & delivering platform to exit...", "المرحلة 2 (Exit Ready): تأمين البوابة وتجهيز المصف للخروج..."));
             _stepFloors.Add(-2);
 
             _dynamicSteps.Add(_opType == "PARK"
-                ? Loc.T("✅ Vehicle parked in " + _chosenSpace.SpaceNumber + " — confirmed by PLC & limit switches!", "✅ اكتمل إيداع المركبة في " + _chosenSpace.SpaceNumber + " بتأكيد الحساسات والـ PLC!")
-                : Loc.T("✅ Vehicle ready for pickup at exit gate from " + _chosenSpace.SpaceNumber + "!", "✅ المركبة جاهزة للاستلام عند البوابة من " + _chosenSpace.SpaceNumber + "!"));
+                ? Loc.T("✅ Park completed in " + _chosenSpace.SpaceNumber + " — confirmed by PLC & limit switches!", "✅ اكتمل الإيداع في " + _chosenSpace.SpaceNumber + " بتأكيد الحساسات والـ PLC!")
+                : Loc.T("✅ Bay " + _chosenSpace.SpaceNumber + " ready at exit gate!", "✅ المصف " + _chosenSpace.SpaceNumber + " جاهز عند البوابة!"));
             _stepFloors.Add(0);
 
             _progress.Minimum = 0;
@@ -1121,8 +1027,7 @@ namespace AutoPark
 
             _btnExecute.Enabled = false;
             _btnCancelStep.Enabled = true;
-            _cmbVehicle.Enabled = false;
-            _txtPlate.Enabled = false;
+            _cmbBay.Enabled = false;
             _cancelled = false;
             _waitTicks = 0;
 
@@ -1134,7 +1039,7 @@ namespace AutoPark
                 CommandId = "CMD-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"),
                 RequestNumber = "PR-" + DateTime.Now.ToString("HHmmss"),
                 Type = _opType,
-                PlateNumber = _chosenPlate,
+                PlateNumber = Loc.T("Bay " + _chosenSpace.SpaceNumber, "المصف " + _chosenSpace.SpaceNumber),
                 SpaceNumber = _chosenSpace.SpaceNumber,
                 RequestedBy = Loc.UserDisplay(_shell.CurrentUser),
                 Status = "SENT",
@@ -1145,7 +1050,7 @@ namespace AutoPark
 
             string opCopy = _opType, plateCopy = _chosenPlate, targetSpaceCopy = _chosenSpace.SpaceNumber;
             int laneCopy = lane, levelCopy = plcLevel;
-            bool isOtherCopy = (_opType == "PARK") && _radOtherCar.Checked;
+            bool isOtherCopy = false;
             _backendDispatched = false;
             System.Threading.ThreadPool.QueueUserWorkItem(delegate
             {
@@ -1318,25 +1223,10 @@ namespace AutoPark
             if (_opType == "PARK")
             {
                 _chosenSpace.Status = "OCCUPIED";
-                _chosenSpace.PlateNumber = _chosenPlate;
+                _chosenSpace.PlateNumber = "BAY-" + _chosenSpace.SpaceNumber;
                 _chosenSpace.ParkedByUsername = _shell.CurrentUser.Username;
-                _chosenSpace.IsOtherVehicle = _radOtherCar.Checked;
-                var veh = st.Vehicles.Find(v => v.PlateNumber == _chosenPlate);
-                _chosenSpace.OwnerName = veh != null ? veh.OwnerName : Loc.UserDisplay(_shell.CurrentUser);
-                if (veh == null)
-                {
-                    st.Vehicles.Add(new VehicleItem
-                    {
-                        PlateNumber = _chosenPlate,
-                        Brand = Loc.T("Visitor Vehicle", "مركبة زائر"),
-                        Model = "—",
-                        Color = "—",
-                        VehicleType = Loc.T("Sedan", "صالون"),
-                        OwnerUsername = _radOtherCar.Checked ? "visitor" : _shell.CurrentUser.Username,
-                        OwnerName = _radOtherCar.Checked ? Loc.T("Other / Guest", "سيارة أخرى / زائر") : Loc.UserDisplay(_shell.CurrentUser),
-                        CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm")
-                    });
-                }
+                _chosenSpace.IsOtherVehicle = false;
+                _chosenSpace.OwnerName = Loc.UserDisplay(_shell.CurrentUser);
             }
             else
             {
@@ -1356,18 +1246,18 @@ namespace AutoPark
             _lblStepStatus.Text = _opType == "PARK"
                 ? Loc.T("✅ Deposit Completed (Bay " + _chosenSpace.SpaceNumber + ")! Wait for driver to clear lift, then press '⬇ Lower Lift to Home Position'.",
                         "✅ تم الإيداع بنجاح (المصف " + _chosenSpace.SpaceNumber + ")! بعد خروج السائق، اضغط زر '⬇ إرجاع المصعد للوضع الابتدائي (Home)'.")
-                : Loc.T("✅ Vehicle ready at Bay " + _chosenSpace.SpaceNumber + "! After driver clears lift, press '⬇ Lower Lift to Home Position'.",
-                        "✅ المركبة جاهزة في المصف " + _chosenSpace.SpaceNumber + "! بعد ابتعاد السائق، اضغط زر '⬇ إرجاع المصعد للوضع الابتدائي (Home)'.");
+                : Loc.T("✅ Bay " + _chosenSpace.SpaceNumber + " ready! After driver clears lift, press '⬇ Lower Lift to Home Position'.",
+                        "✅ المصف " + _chosenSpace.SpaceNumber + " جاهز! بعد ابتعاد السائق، اضغط زر '⬇ إرجاع المصعد للوضع الابتدائي (Home)'.");
             _btnReturnGround.Enabled = true;
             _btnReturnGround.BaseColor = Theme.Ok;
             _btnReturnGround.Invalidate();
             Loc.ShowMsg(
                 _opType == "PARK"
-                    ? "Deposit Completed!\n\nVehicle (" + _chosenPlate + ") arrived at Bay " + _chosenSpace.SpaceNumber + ".\n\nIMPORTANT: Wait until the driver exits and moves clear, then press '⬇ Lower Lift to Home Position' on this screen to lower the lift."
-                    : "Vehicle (" + _chosenPlate + ") arrived from Bay " + _chosenSpace.SpaceNumber + "!\n\nAfter clearing the lift, press '⬇ Lower Lift to Home Position' on this screen.",
+                    ? "Deposit Completed!\n\nLift arrived at Bay " + _chosenSpace.SpaceNumber + ".\n\nIMPORTANT: Wait until the driver exits and moves clear, then press '⬇ Lower Lift to Home Position' on this screen to lower the lift."
+                    : "Bay " + _chosenSpace.SpaceNumber + " arrived!\n\nAfter clearing the lift, press '⬇ Lower Lift to Home Position' on this screen.",
                 _opType == "PARK"
-                    ? "تم الإيداع بنجاح (Deposit Completed)!\n\nوصلت المركبة (" + _chosenPlate + ") إلى المصف " + _chosenSpace.SpaceNumber + ".\n\nمهم: انتظر حتى يخرج السائق ويبتعد عن المصعد، ثم اضغط زر '⬇ إرجاع المصعد للوضع الابتدائي (Home)' في هذه الشاشة لإنزال المصعد."
-                    : "وصلت المركبة (" + _chosenPlate + ") من المصف " + _chosenSpace.SpaceNumber + "!\n\nبعد خروج السائق، اضغط زر '⬇ إرجاع المصعد للوضع الابتدائي (Home)' في هذه الشاشة.",
+                    ? "تم الإيداع بنجاح (Deposit Completed)!\n\nوصل المصعد إلى المصف " + _chosenSpace.SpaceNumber + ".\n\nمهم: انتظر حتى يخرج السائق ويبتعد عن المصعد، ثم اضغط زر '⬇ إرجاع المصعد للوضع الابتدائي (Home)' في هذه الشاشة لإنزال المصعد."
+                    : "وصل المصعد من المصف " + _chosenSpace.SpaceNumber + "!\n\nبعد خروج السائق، اضغط زر '⬇ إرجاع المصعد للوضع الابتدائي (Home)' في هذه الشاشة.",
                 _opType == "PARK" ? "Deposit Completed" : "Operation Completed",
                 _opType == "PARK" ? "تم الإيداع بنجاح" : "اكتملت العملية بنجاح",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1756,7 +1646,7 @@ namespace AutoPark
             _grid.Columns.Add("CommandId", Loc.T("Command ID", "معرف الأمر الصناعي"));
             _grid.Columns.Add("ReqNo", Loc.T("Request No.", "رقم الطلب"));
             _grid.Columns.Add("Type", Loc.T("Action", "العملية"));
-            _grid.Columns.Add("Plate", Loc.T("Plate / Details", "اللوحة / التفاصيل"));
+            _grid.Columns.Add("Details", Loc.T("Details", "التفاصيل"));
             _grid.Columns.Add("Space", Loc.T("Bay / Target", "المصف / الهدف"));
             _grid.Columns.Add("Status", Loc.T("Status", "الحالة"));
             _grid.Columns.Add("User", Loc.T("Employee", "المستخدم"));
@@ -1765,7 +1655,10 @@ namespace AutoPark
 
             foreach (var c in ParkState.Instance.Commands)
             {
-                _grid.Rows.Add(c.CommandId, c.RequestNumber, c.Type, c.PlateNumber, c.SpaceNumber, c.Status, c.RequestedBy, c.CreatedAt, c.CompletedAt);
+                string detailText = string.IsNullOrEmpty(c.PlateNumber) || c.PlateNumber.StartsWith("BAY-", StringComparison.OrdinalIgnoreCase)
+                    ? Loc.T("Bay " + c.SpaceNumber, "المصف " + c.SpaceNumber)
+                    : c.PlateNumber;
+                _grid.Rows.Add(c.CommandId, c.RequestNumber, c.Type, detailText, c.SpaceNumber, c.Status, c.RequestedBy, c.CreatedAt, c.CompletedAt);
             }
 
             card.Controls.Add(_grid);
@@ -1779,7 +1672,7 @@ namespace AutoPark
             {
                 if (sfd.ShowDialog() != DialogResult.OK) return;
                 var sb = new StringBuilder();
-                sb.AppendLine("CommandID,RequestNumber,Type,PlateNumber,SpaceNumber,Status,RequestedBy,CreatedAt,CompletedAt");
+                sb.AppendLine("CommandID,RequestNumber,Type,Details,SpaceNumber,Status,RequestedBy,CreatedAt,CompletedAt");
                 foreach (var c in ParkState.Instance.Commands)
                 {
                     sb.AppendLine(string.Join(",", new string[]

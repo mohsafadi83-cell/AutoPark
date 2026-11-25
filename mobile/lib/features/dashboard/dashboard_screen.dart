@@ -231,7 +231,7 @@ class DashboardScreen extends ConsumerWidget {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                '${req.plateNumber} • ${req.requestNumber}',
+                                req.requestNumber,
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w800,
                                 ),

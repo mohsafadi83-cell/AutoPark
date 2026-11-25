@@ -111,7 +111,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                         controller: _searchCtrl,
                         onSubmitted: (_) => _load(),
                         decoration: InputDecoration(
-                          hintText: l10n.searchPlaceholder,
+                          hintText:
+                              Localizations.localeOf(context).languageCode ==
+                                      'ar'
+                                  ? 'بحث برقم الطلب أو الموقف أو المستخدم...'
+                                  : 'Search bay, request #, user...',
                           prefixIcon: const Icon(Icons.search_rounded),
                         ),
                       ),
@@ -196,8 +200,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                                     Text(item.description!),
                                   Text(
                                     [
-                                      if (item.plateNumber != null)
-                                        item.plateNumber,
                                       if (item.actor != null) item.actor,
                                       fmt.format(item.createdAt.toLocal()),
                                     ].join(' • '),

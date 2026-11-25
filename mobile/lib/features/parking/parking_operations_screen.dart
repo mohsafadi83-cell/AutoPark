@@ -25,11 +25,8 @@ class _ParkingOperationsScreenState
     extends ConsumerState<ParkingOperationsScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
-  String? _selectedParkVehicleId;
-  String? _selectedRetrieveVehicleId;
-  final _manualParkPlateCtrl = TextEditingController();
-  final _manualRetrievePlateCtrl = TextEditingController();
-  bool _parkIsOtherVehicle = false;
+  String? _selectedParkSpaceNumber;
+  String? _selectedRetrieveSpaceNumber;
   bool _submitting = false;
 
   @override
@@ -53,21 +50,33 @@ class _ParkingOperationsScreenState
   @override
   void dispose() {
     _tabController.dispose();
-    _manualParkPlateCtrl.dispose();
-    _manualRetrievePlateCtrl.dispose();
     super.dispose();
+  }
+
+  String _bayLabel(ParkingSpace space, bool isAr) {
+    final floorTxt = space.level == 1
+        ? (isAr ? 'P1 (علوي)' : 'P1 (Top)')
+        : (space.level == 2
+            ? (isAr ? 'P2 (أوسط)' : 'P2 (Mid)')
+            : (isAr ? 'P3 (سفلي)' : 'P3 (Bottom)'));
+    return '${space.spaceNumber} — ${space.zone} • $floorTxt';
   }
 
   Future<void> _confirmAndDispatch({
     required bool isPark,
-    Vehicle? vehicle,
-    String? manualPlate,
+    required ParkingSpace? space,
   }) async {
     final l10n = AppLocalizations.of(context);
-    final plate = vehicle?.plateNumber ?? manualPlate?.trim().toUpperCase() ?? '';
-    if (plate.isEmpty && vehicle == null) {
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    if (space == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.plateNumberRequired)),
+        SnackBar(
+          content: Text(
+            isPark
+                ? (isAr ? 'لا توجد مواقف فارغة متاحة حالياً' : 'No empty bays available right now')
+                : (isAr ? 'لا توجد مواقف مشغولة للاسترجاع حالياً' : 'No occupied bays available for retrieval'),
+          ),
+        ),
       );
       return;
     }
@@ -95,16 +104,9 @@ class _ParkingOperationsScreenState
             ),
             const SizedBox(height: 8),
             _ConfirmRow(
-              label: l10n.plateNumber,
-              value: vehicle?.displayName ?? plate,
+              label: l10n.assignedSpace,
+              value: _bayLabel(space, isAr),
             ),
-            if (!isPark && vehicle?.parkingSpaceNumber != null) ...[
-              const SizedBox(height: 8),
-              _ConfirmRow(
-                label: l10n.assignedSpace,
-                value: vehicle!.parkingSpaceNumber!,
-              ),
-            ],
             const SizedBox(height: 8),
             _ConfirmRow(
               label: l10n.estimatedStatus,
@@ -133,18 +135,14 @@ class _ParkingOperationsScreenState
       final api = ref.read(appControllerProvider.notifier).api;
       final req = isPark
           ? await api.requestPark(
-              vehicleId: vehicle?.id,
-              plateNumber: vehicle == null ? plate : null,
-              isOtherVehicle: _parkIsOtherVehicle,
+              targetSpaceNumber: space.spaceNumber,
             )
           : await api.requestRetrieve(
-              vehicleId: vehicle?.id,
-              plateNumber: vehicle == null ? plate : null,
+              plateNumber: space.vehiclePlate,
+              targetSpaceNumber: space.spaceNumber,
             );
       ref.read(appControllerProvider.notifier).upsertRequest(req);
       await ref.read(appControllerProvider.notifier).refreshAllData();
-      _manualParkPlateCtrl.clear();
-      _manualRetrievePlateCtrl.clear();
     } on ApiError catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -208,11 +206,23 @@ class _ParkingOperationsScreenState
     final canDispatch = appState.canDispatchCommands &&
         (user?.canRequestParking ?? false) &&
         !_submitting;
-    final canManualPlate = user?.canRequestAnyVehicle ?? false;
 
-    final unparkedVehicles =
-        appState.vehicles.where((v) => !v.parked).toList();
-    final parkedVehicles = appState.vehicles.where((v) => v.parked).toList();
+    int compareBays(ParkingSpace a, ParkingSpace b) {
+      final zoneCmp = a.zone.compareTo(b.zone);
+      if (zoneCmp != 0) return zoneCmp;
+      final lvlCmp = a.level.compareTo(b.level);
+      if (lvlCmp != 0) return lvlCmp;
+      return a.spaceNumber.compareTo(b.spaceNumber);
+    }
+
+    final availableSpaces = appState.spaces
+        .where((s) => s.status == SpaceStatus.available)
+        .toList()
+      ..sort(compareBays);
+    final occupiedSpaces = appState.spaces
+        .where((s) => s.status == SpaceStatus.occupied)
+        .toList()
+      ..sort(compareBays);
 
     return Column(
       children: [
@@ -240,12 +250,10 @@ class _ParkingOperationsScreenState
                 context: context,
                 l10n: l10n,
                 isPark: true,
-                vehicles: unparkedVehicles,
-                selectedVehicleId: _selectedParkVehicleId,
-                onSelectVehicle: (id) =>
-                    setState(() => _selectedParkVehicleId = id),
-                manualPlateCtrl: _manualParkPlateCtrl,
-                canManualPlate: canManualPlate,
+                spaces: availableSpaces,
+                selectedSpaceNumber: _selectedParkSpaceNumber,
+                onSelectSpace: (spaceNum) =>
+                    setState(() => _selectedParkSpaceNumber = spaceNum),
                 canDispatch: canDispatch,
                 requests: appState.activeRequests
                     .where((r) => r.requestType == 'PARK')
@@ -255,12 +263,10 @@ class _ParkingOperationsScreenState
                 context: context,
                 l10n: l10n,
                 isPark: false,
-                vehicles: parkedVehicles,
-                selectedVehicleId: _selectedRetrieveVehicleId,
-                onSelectVehicle: (id) =>
-                    setState(() => _selectedRetrieveVehicleId = id),
-                manualPlateCtrl: _manualRetrievePlateCtrl,
-                canManualPlate: canManualPlate,
+                spaces: occupiedSpaces,
+                selectedSpaceNumber: _selectedRetrieveSpaceNumber,
+                onSelectSpace: (spaceNum) =>
+                    setState(() => _selectedRetrieveSpaceNumber = spaceNum),
                 canDispatch: canDispatch,
                 requests: appState.activeRequests
                     .where((r) => r.requestType == 'RETRIEVE')
@@ -277,19 +283,19 @@ class _ParkingOperationsScreenState
     required BuildContext context,
     required AppLocalizations l10n,
     required bool isPark,
-    required List<Vehicle> vehicles,
-    required String? selectedVehicleId,
-    required ValueChanged<String?> onSelectVehicle,
-    required TextEditingController manualPlateCtrl,
-    required bool canManualPlate,
+    required List<ParkingSpace> spaces,
+    required String? selectedSpaceNumber,
+    required ValueChanged<String?> onSelectSpace,
     required bool canDispatch,
     required List<ParkingRequest> requests,
   }) {
-    final effectiveSelected = vehicles.any((v) => v.id == selectedVehicleId)
-        ? selectedVehicleId
-        : (vehicles.isNotEmpty ? vehicles.first.id : null);
-    final chosenVehicle =
-        vehicles.where((v) => v.id == effectiveSelected).firstOrNull;
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    final effectiveSelected =
+        spaces.any((s) => s.spaceNumber == selectedSpaceNumber)
+            ? selectedSpaceNumber
+            : (spaces.isNotEmpty ? spaces.first.spaceNumber : null);
+    final chosenSpace =
+        spaces.where((s) => s.spaceNumber == effectiveSelected).firstOrNull;
 
     return RefreshIndicator(
       onRefresh: () => ref.read(appControllerProvider.notifier).refreshAllData(),
@@ -308,47 +314,8 @@ class _ParkingOperationsScreenState
                           fontWeight: FontWeight.w800,
                         ),
                   ),
-                  if (isPark) ...[
-                    const SizedBox(height: 10),
-                    Builder(
-                      builder: (ctx) {
-                        final isAr =
-                            Localizations.localeOf(ctx).languageCode == 'ar';
-                        return Wrap(
-                          spacing: 8,
-                          runSpacing: 6,
-                          children: [
-                            ChoiceChip(
-                              selectedColor:
-                                  const Color(0xFFEAB308).withOpacity(0.28),
-                              label: Text(
-                                isAr
-                                    ? '🟡 سيارتي الشخصية (أصفر)'
-                                    : '🟡 My Personal Car (Yellow)',
-                              ),
-                              selected: !_parkIsOtherVehicle,
-                              onSelected: (_) =>
-                                  setState(() => _parkIsOtherVehicle = false),
-                            ),
-                            ChoiceChip(
-                              selectedColor:
-                                  const Color(0xFF8B5CF6).withOpacity(0.28),
-                              label: Text(
-                                isAr
-                                    ? '🟣 سيارة أخرى / زائر (نهدي)'
-                                    : '🟣 Other / Guest Car (Purple)',
-                              ),
-                              selected: _parkIsOtherVehicle,
-                              onSelected: (_) =>
-                                  setState(() => _parkIsOtherVehicle = true),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ],
                   const SizedBox(height: 14),
-                  if (vehicles.isEmpty && !canManualPlate)
+                  if (spaces.isEmpty)
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
@@ -357,44 +324,36 @@ class _ParkingOperationsScreenState
                       ),
                       child: Text(
                         isPark
-                            ? l10n.noAvailableVehiclesToPark
-                            : l10n.noParkedVehiclesToRetrieve,
+                            ? (isAr
+                                ? 'لا توجد مواقف فارغة متاحة حالياً (جميع المواقف الـ 12 مشغولة).'
+                                : 'No available empty bays right now (all 12 bays are occupied).')
+                            : (isAr
+                                ? 'لا توجد مواقف مشغولة جاهزة للاسترجاع حالياً.'
+                                : 'No occupied bays found ready for retrieval.'),
                       ),
                     )
-                  else if (vehicles.isNotEmpty) ...[
+                  else
                     DropdownButtonFormField<String>(
                       value: effectiveSelected,
                       decoration: InputDecoration(
-                        labelText: l10n.selectVehicle,
-                        prefixIcon:
-                            const Icon(Icons.directions_car_filled_rounded),
+                        labelText: isPark
+                            ? (isAr
+                                ? 'اختر الموقف الفارغ (L11 – L43)'
+                                : 'Select Empty Bay (L11 – L43)')
+                            : (isAr
+                                ? 'اختر الموقف المشغول للاسترجاع (L11 – L43)'
+                                : 'Select Occupied Bay to Retrieve (L11 – L43)'),
+                        prefixIcon: const Icon(Icons.grid_view_rounded),
                       ),
                       items: [
-                        for (final v in vehicles)
+                        for (final s in spaces)
                           DropdownMenuItem(
-                            value: v.id,
-                            child: Text(
-                              v.parkingSpaceNumber != null
-                                  ? '${v.displayName} (${v.parkingSpaceNumber})'
-                                  : v.displayName,
-                            ),
+                            value: s.spaceNumber,
+                            child: Text(_bayLabel(s, isAr)),
                           ),
                       ],
-                      onChanged: onSelectVehicle,
+                      onChanged: onSelectSpace,
                     ),
-                  ],
-                  if (canManualPlate) ...[
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: manualPlateCtrl,
-                      textCapitalization: TextCapitalization.characters,
-                      decoration: InputDecoration(
-                        labelText: l10n.enterPlateManual,
-                        hintText: 'ABC-1234',
-                        prefixIcon: const Icon(Icons.pin_rounded),
-                      ),
-                    ),
-                  ],
                   const SizedBox(height: 16),
                   ElevatedButton.icon(
                     key: Key(
@@ -402,15 +361,11 @@ class _ParkingOperationsScreenState
                           ? 'submit_park_request_btn'
                           : 'submit_retrieve_request_btn',
                     ),
-                    onPressed: canDispatch
-                        ? () {
-                            final manual = manualPlateCtrl.text.trim();
-                            _confirmAndDispatch(
+                    onPressed: (canDispatch && chosenSpace != null)
+                        ? () => _confirmAndDispatch(
                               isPark: isPark,
-                              vehicle: manual.isNotEmpty ? null : chosenVehicle,
-                              manualPlate: manual.isNotEmpty ? manual : null,
-                            );
-                          }
+                              space: chosenSpace,
+                            )
                         : null,
                     icon: Icon(
                       isPark
@@ -452,7 +407,7 @@ class _ParkingOperationsScreenState
                           children: [
                             Expanded(
                               child: Text(
-                                '${req.plateNumber} • ${req.requestNumber}',
+                                '${req.spaceNumber ?? (isAr ? 'موقف' : 'Bay')} • ${req.requestNumber}',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w800,
                                   fontSize: 15,

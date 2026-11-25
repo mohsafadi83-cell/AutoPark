@@ -777,7 +777,7 @@ namespace AutoPark
                 CommandId = "CMD-" + DateTime.Now.ToString("yyyyMMdd") + "-0001",
                 RequestNumber = "PR-" + DateTime.Now.ToString("yyyyMMdd") + "-01",
                 Type = "PARK",
-                PlateNumber = "22-78910",
+                PlateNumber = "Bay L21",
                 SpaceNumber = "L21",
                 RequestedBy = "Mohammad Al-Safadi",
                 Status = "COMPLETED",

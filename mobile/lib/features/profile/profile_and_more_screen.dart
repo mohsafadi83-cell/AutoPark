@@ -10,7 +10,6 @@ import '../history/history_screen.dart';
 import '../monitoring/monitoring_screen.dart';
 import '../notifications/notifications_screen.dart';
 import '../settings/industrial_config_screen.dart';
-import '../vehicles/vehicles_screen.dart';
 
 class ProfileAndMoreScreen extends ConsumerStatefulWidget {
   const ProfileAndMoreScreen({super.key});
@@ -285,22 +284,6 @@ class _ProfileAndMoreScreenState extends ConsumerState<ProfileAndMoreScreen> {
         Card(
           child: Column(
             children: [
-              if (user?.canManageVehicles ?? false) ...[
-                ListTile(
-                  leading: const Icon(
-                    Icons.directions_car_filled_rounded,
-                    color: AppColors.primaryCyan,
-                  ),
-                  title: Text(l10n.vehiclesScreenTitle),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const VehiclesScreen(),
-                    ),
-                  ),
-                ),
-                const Divider(height: 1),
-              ],
               if ((user?.hasPermission(Permission.historyViewOwn) ?? false) ||
                   (user?.canViewAllHistory ?? false)) ...[
                 ListTile(

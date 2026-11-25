@@ -77,13 +77,6 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
             ),
             const SizedBox(height: 6),
             Text('${space.zone} • ${_floorDescription(space.level, isAr)}'),
-            if (!isPark && space.vehiclePlate != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                '${l10n.plateNumber}: ${space.vehiclePlate}',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ],
             const SizedBox(height: 10),
             Text(
               isAr
@@ -638,16 +631,6 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
                       _floorDescription(selectedSpace.level, isAr),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    if (selectedSpace.vehiclePlate != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        '${l10n.plateNumber}: ${selectedSpace.vehiclePlate}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.primaryCyan,
-                        ),
-                      ),
-                    ],
                     const SizedBox(height: 12),
                     if (selectedSpace.status == SpaceStatus.available) ...[
                       ElevatedButton.icon(
@@ -832,20 +815,6 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
                 ],
               ),
               const SizedBox(height: 4),
-              if (space.vehiclePlate != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    space.vehiclePlate!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      color: color,
-                    ),
-                  ),
-                ),
               Text(
                 label,
                 maxLines: 1,

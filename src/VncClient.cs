@@ -54,7 +54,6 @@ namespace AutoPark
         readonly Label _lblStatus;
         readonly Label _lblSelectedInfo;
         readonly Label _lblPlcLive;
-        readonly TextBox _txtPlate;
         readonly TextBox _txtPlcTag;
         readonly TextBox _txtPlcVal;
         readonly TableLayoutPanel _hmiGrid;
@@ -177,19 +176,11 @@ namespace AutoPark
                 }
             }
 
-            // Bottom quick action bar inside HMI console (Direct Park / Retrieve on selected bay)
+            // Bottom quick action bar inside HMI console (Direct Park / Retrieve on selected bay — Bay-only workflow)
             var hmiFooter = new Panel { Dock = DockStyle.Bottom, Height = 56, Padding = new Padding(0, 8, 0, 0), BackColor = Color.Transparent };
 
-            var lblPlate = Theme.Label(Loc.T("Plate:", "اللوحة:"), Theme.Bold(9.5f), Color.White);
-            lblPlate.Dock = startDock;
-            lblPlate.Width = 56;
-
-            _txtPlate = new TextBox
-            {
-                Text = "22-78910",
-                Font = Theme.Bold(10.5f),
-                RightToLeft = RightToLeft.No
-            };
+            var lblBayHint = Theme.Label(Loc.T("Select any bay above, then tap Park IN or Retrieve OUT:", "اختر أي مصف من الأعلى ثم اضغط إيداع أو استرجاع:"), Theme.Semi(9f), Color.FromArgb(148, 163, 184));
+            lblBayHint.Dock = DockStyle.Fill;
 
             var btnParkIn = MakeTopBtn(Loc.T("Park IN (Selected)", "إيداع في المصف"), Icons.Park, Theme.Primary, Theme.PrimaryHover, Color.White);
             btnParkIn.Enabled = shell.CurrentUser.CanControl && !shell.Settings.ReadOnlyMode;
@@ -199,10 +190,9 @@ namespace AutoPark
             btnRetrieveOut.Enabled = shell.CurrentUser.CanControl && !shell.Settings.ReadOnlyMode;
             btnRetrieveOut.Click += delegate { ExecuteDirectBayOp(false); };
 
+            hmiFooter.Controls.Add(lblBayHint);
             hmiFooter.Controls.Add(Theme.Holder(btnRetrieveOut, endDock, 152, new Padding(6, 2, 0, 2)));
             hmiFooter.Controls.Add(Theme.Holder(btnParkIn, endDock, 160, new Padding(6, 2, 4, 2)));
-            hmiFooter.Controls.Add(Theme.Holder(_txtPlate, startDock, 145, new Padding(6, 10, 8, 6)));
-            hmiFooter.Controls.Add(lblPlate);
 
             hmiCard.Controls.Add(_hmiGrid);
             hmiCard.Controls.Add(hmiFooter);
@@ -389,8 +379,10 @@ namespace AutoPark
                 bool isSelected = string.Equals(sp.SpaceNumber, _selectedBayCode, StringComparison.OrdinalIgnoreCase);
                 if (isSelected) selectedSpace = sp;
 
-                string plateLine = string.IsNullOrEmpty(sp.PlateNumber) ? Loc.T("EMPTY", "فارغ") : sp.PlateNumber;
-                btn.Text = sp.SpaceNumber + "  (P" + sp.PositionInColumn + ")\n" + plateLine;
+                string statusLine = sp.Status == "OCCUPIED"
+                    ? Loc.T("OCCUPIED", "مشغول")
+                    : (sp.Status == "MOVING" ? Loc.T("MOVING", "متحرك") : Loc.T("EMPTY", "فارغ"));
+                btn.Text = sp.SpaceNumber + "  (P" + sp.PositionInColumn + ")\n" + statusLine;
 
                 if (sp.Status == "OCCUPIED")
                 {
@@ -412,10 +404,9 @@ namespace AutoPark
             if (selectedSpace != null)
             {
                 _lblSelectedInfo.Text = string.Format(
-                    Loc.T("Selected: {0} (Lane {1}, Floor P{2}) — Status: {3}\nPlate: {4}",
-                          "المصف المحدد: {0} (مسار {1}، طابق P{2}) — الحالة: {3}\nاللوحة: {4}"),
-                    selectedSpace.SpaceNumber, selectedSpace.ColumnNumber, selectedSpace.PositionInColumn, selectedSpace.Status,
-                    string.IsNullOrEmpty(selectedSpace.PlateNumber) ? "-" : selectedSpace.PlateNumber);
+                    Loc.T("Selected Bay: {0} (Lane {1}, Floor P{2})\nStatus: {3}",
+                          "المصف المحدد: {0} (مسار {1}، طابق P{2})\nالحالة: {3}"),
+                    selectedSpace.SpaceNumber, selectedSpace.ColumnNumber, selectedSpace.PositionInColumn, selectedSpace.Status);
             }
         }
 
@@ -431,17 +422,17 @@ namespace AutoPark
             var sp = st.Spaces.Find(x => string.Equals(x.SpaceNumber, _selectedBayCode, StringComparison.OrdinalIgnoreCase));
             if (sp == null) return;
 
-            string plate = (_txtPlate.Text ?? "").Trim();
-            if (isParkIn && string.IsNullOrEmpty(plate)) plate = "JO-" + DateTime.Now.ToString("HHmm");
-            if (!isParkIn && string.IsNullOrEmpty(plate)) plate = sp.PlateNumber ?? "";
+            string internalBayId = (!isParkIn && !string.IsNullOrEmpty(sp.PlateNumber))
+                ? sp.PlateNumber
+                : ("BAY-" + sp.SpaceNumber);
 
             // When backend is online, dispatch through the full 15-step safety workflow & verified TIA Portal 2-step S7-1200 sequence!
             if (st.BackendConnected && !string.IsNullOrEmpty(st.BackendToken))
             {
                 string endpoint = isParkIn ? "/parking/request" : "/parking/retrieve";
-                string safePlate = (plate ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
+                string safeId = (internalBayId ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
                 string safeSpace = (sp.SpaceNumber ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
-                string payload = "{\"plateNumber\":\"" + safePlate + "\",\"targetSpaceNumber\":\"" + safeSpace + "\",\"source\":\"ADMIN\"}";
+                string payload = "{\"plateNumber\":\"" + safeId + "\",\"targetSpaceNumber\":\"" + safeSpace + "\",\"source\":\"ADMIN\"}";
                 SetStatus(Loc.T("Dispatching full S7-1200 2-step sequence for " + sp.SpaceNumber + "...", "جاري إرسال تتابع الرفع الكامل لـ " + sp.SpaceNumber + "..."), Theme.Primary);
 
                 ThreadPool.QueueUserWorkItem(delegate
@@ -452,7 +443,7 @@ namespace AutoPark
                         st.PullSpacesFromDatabase();
                         st.PullSensorsFromBackend();
                         SetStatus(isParkIn
-                            ? Loc.T("S7-1200 Park-IN sequence dispatched for " + sp.SpaceNumber + " (" + plate + ")", "تم إرسال أمر الإيداع الكامل للمصف " + sp.SpaceNumber)
+                            ? Loc.T("S7-1200 Park-IN sequence dispatched for " + sp.SpaceNumber, "تم إرسال أمر الإيداع الكامل للمصف " + sp.SpaceNumber)
                             : Loc.T("S7-1200 Retrieve-OUT sequence dispatched for " + sp.SpaceNumber, "تم إرسال أمر الاسترجاع الكامل للمصف " + sp.SpaceNumber),
                             Theme.Ok);
                         if (!IsDisposed && IsHandleCreated)
@@ -468,7 +459,7 @@ namespace AutoPark
                         {
                             BeginInvoke((Action)delegate
                             {
-                                ApplyLocalStandaloneBayOp(sp, isParkIn, plate, resp);
+                                ApplyLocalStandaloneBayOp(sp, isParkIn, internalBayId, resp);
                             });
                         }
                         catch { }
@@ -477,36 +468,35 @@ namespace AutoPark
                 return;
             }
 
-            ApplyLocalStandaloneBayOp(sp, isParkIn, plate, null);
+            ApplyLocalStandaloneBayOp(sp, isParkIn, internalBayId, null);
         }
 
-        void ApplyLocalStandaloneBayOp(SpaceItem sp, bool isParkIn, string plate, string backendErr)
+        void ApplyLocalStandaloneBayOp(SpaceItem sp, bool isParkIn, string internalBayId, string backendErr)
         {
             var st = ParkState.Instance;
             if (isParkIn)
             {
                 sp.Status = "OCCUPIED";
-                sp.PlateNumber = plate;
+                sp.PlateNumber = internalBayId;
                 sp.OwnerName = Loc.UserDisplay(_shell.CurrentUser);
                 sp.ParkedByUsername = _shell.CurrentUser.Username;
                 sp.UpdatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
-                st.RecordLocalAudit("PARK", sp.SpaceNumber, plate + " (Standalone Direct HMI)", Loc.UserDisplay(_shell.CurrentUser));
+                st.RecordLocalAudit("PARK", sp.SpaceNumber, "Bay " + sp.SpaceNumber + " (Direct HMI)", Loc.UserDisplay(_shell.CurrentUser));
                 st.Save();
                 st.NotifyChanged();
-                SetStatus(Loc.T("Standalone Local Park-IN: " + plate + " -> " + sp.SpaceNumber + (string.IsNullOrEmpty(backendErr) ? "" : " (PLC Offline)"), "تم الإيداع محلياً (مستقل): " + sp.SpaceNumber), Theme.Ok);
+                SetStatus(Loc.T("Standalone Local Park-IN: " + sp.SpaceNumber + (string.IsNullOrEmpty(backendErr) ? "" : " (PLC Offline)"), "تم الإيداع محلياً (مستقل): " + sp.SpaceNumber), Theme.Ok);
             }
             else
             {
-                string prevPlate = string.IsNullOrEmpty(sp.PlateNumber) ? "-" : sp.PlateNumber;
                 sp.Status = "AVAILABLE";
                 sp.PlateNumber = "";
                 sp.OwnerName = "";
                 sp.ParkedByUsername = "";
                 sp.UpdatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
-                st.RecordLocalAudit("RETRIEVE", sp.SpaceNumber, prevPlate + " (Standalone Direct HMI)", Loc.UserDisplay(_shell.CurrentUser));
+                st.RecordLocalAudit("RETRIEVE", sp.SpaceNumber, "Bay " + sp.SpaceNumber + " (Direct HMI)", Loc.UserDisplay(_shell.CurrentUser));
                 st.Save();
                 st.NotifyChanged();
-                SetStatus(Loc.T("Standalone Local Retrieve-OUT: " + prevPlate + " <- " + sp.SpaceNumber + (string.IsNullOrEmpty(backendErr) ? "" : " (PLC Offline)"), "تم الاسترجاع محلياً (مستقل): " + sp.SpaceNumber), Theme.Ok);
+                SetStatus(Loc.T("Standalone Local Retrieve-OUT: " + sp.SpaceNumber + (string.IsNullOrEmpty(backendErr) ? "" : " (PLC Offline)"), "تم الاسترجاع محلياً (مستقل): " + sp.SpaceNumber), Theme.Ok);
             }
         }
 
