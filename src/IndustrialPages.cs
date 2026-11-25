@@ -931,7 +931,7 @@ namespace AutoPark
             }
             else if (s.ManualMode)
             {
-                _lblModePill.Text = "● MANUAL";
+                _lblModePill.Text = "● HOME MODE";
                 _lblModePill.BackColor = Theme.AmberSoft;
                 _lblModePill.ForeColor = Theme.Amber;
             }
@@ -1066,7 +1066,7 @@ namespace AutoPark
             var modeBar = new Panel { Dock = DockStyle.Top, Height = 52, Padding = new Padding(0, 4, 0, 4) };
             _btnModeManual = new ModernButton
             {
-                Text = Loc.T("Manual Mode", "الوضع اليدوي"),
+                Text = Loc.T("Home Mode", "وضع التموضع (Home)"),
                 IconGlyph = Icons.Settings,
                 BaseColor = Theme.Amber,
                 HoverColor = Color.FromArgb(180, 83, 9)
@@ -1109,7 +1109,7 @@ namespace AutoPark
 
             var btnReturnHome = new ModernButton
             {
-                Text = Loc.T("⬇ Home", "⬇ إرجاع للوضع الابتدائي"),
+                Text = Loc.T("⬇ Home Position", "⬇ الوضع الابتدائي (Home)"),
                 BaseColor = Theme.Blue,
                 HoverColor = Color.FromArgb(29, 78, 216)
             };
@@ -1616,8 +1616,8 @@ namespace AutoPark
             ParkState.Instance.Sensors.AutoMode = !enableManual;
             if (_liveMonitor != null) _liveMonitor.RenderNow();
             _lblStatus.Text = enableManual
-                ? Loc.T("🟠 Manual Mode Active — Click any button to toggle ON/OFF.", "🟠 الوضع اليدوي مفعّل (Manual Mode Active) — اضغط على أي زر للتشغيل أو الإيقاف.")
-                : Loc.T("🟢 Auto Mode Active — Manual controls locked.", "🟢 الوضع التلقائي مفعّل (Auto Mode Active) — تم قفل أزرار التحكم اليدوي.");
+                ? Loc.T("🟠 Home Mode Active — Controls unlocked. Press Home Position to return lift to home.", "🟠 وضع التموضع (Home Mode) مفعّل — اضغط الوضع الابتدائي (Home) لإرجاع المصعد.")
+                : Loc.T("🟢 Auto Mode Active — Home Mode controls locked.", "🟢 الوضع التلقائي مفعّل — تم قفل أزرار وضع التموضع.");
             _lblStatus.ForeColor = enableManual ? Theme.Amber : Theme.Ok;
 
             ParkState.Instance.RecordLocalAudit("MODE_SWITCH", enableManual ? "MANUAL" : "AUTO",

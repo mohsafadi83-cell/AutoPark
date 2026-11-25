@@ -381,7 +381,7 @@ class _MainShellScreenState extends ConsumerState<MainShellScreen> {
                   : Icons.swap_vert_circle_rounded,
             ),
             label: canManualControl
-                ? (isAr ? 'يدوي وحساسات' : 'Manual PLC')
+                ? (isAr ? 'وضع التموضع' : 'Home Mode')
                 : l10n.navOperations,
           ),
           if (canViewAlarms)

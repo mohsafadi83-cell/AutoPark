@@ -793,7 +793,7 @@ class _ManualPlcControlScreenState
                   ),
                   child: Text(
                     _manualEnabled
-                        ? (isAr ? 'يدوي (MANUAL)' : 'MANUAL')
+                        ? (isAr ? 'وضع التموضع (HOME)' : 'HOME MODE')
                         : (isAr ? 'تلقائي (AUTO)' : 'AUTO'),
                     style: TextStyle(
                       fontSize: 11,
@@ -838,8 +838,8 @@ class _ManualPlcControlScreenState
                     onPressed: _modeBusy || _manualEnabled || isEStop || isOffline
                         ? null
                         : () => _setManualMode(true, isAr),
-                    icon: const Icon(Icons.engineering_rounded, size: 18),
-                    label: Text(isAr ? 'وضع يدوي' : 'Manual Mode'),
+                    icon: const Icon(Icons.home_work_rounded, size: 18),
+                    label: Text(isAr ? 'وضع التموضع (Home)' : 'Home Mode'),
                   ),
                 ),
               ],
@@ -860,7 +860,7 @@ class _ManualPlcControlScreenState
                           : () => _returnLiftToHome(isAr),
                       icon: const Icon(Icons.home_rounded, size: 18),
                       label: Text(
-                        isAr ? '⬇ إرجاع للوضع الابتدائي' : '⬇ Return Home',
+                        isAr ? '⬇ الوضع الابتدائي (Home)' : '⬇ Home Position',
                         style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
                       ),
                     ),
