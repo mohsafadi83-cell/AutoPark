@@ -29,9 +29,10 @@ function optInt(name: string): number | null {
 }
 
 export function loadConfig() {
-  const mode = str('APP_MODE', 'SIMULATION').toUpperCase() as AppMode;
+  const rawMode = str('APP_MODE', 'SIMULATION').toUpperCase();
+  const mode = (rawMode === 'LIVE' ? 'PRODUCTION' : rawMode) as AppMode;
   if (mode !== 'SIMULATION' && mode !== 'PRODUCTION') {
-    throw new Error(`APP_MODE must be SIMULATION or PRODUCTION (got ${mode})`);
+    throw new Error(`APP_MODE must be SIMULATION or PRODUCTION (got ${rawMode})`);
   }
   const nodeEnv = str('NODE_ENV', 'development');
   const cfg = {

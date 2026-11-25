@@ -38,15 +38,16 @@ if exist "%~dp0.git" (
 )
 
 echo.
-echo [1.5/5] Ensuring LIVE Production Mode (APP_MODE=LIVE, INDUSTRIAL_WRITE_ENABLED=true) in backend\.env...
+echo [1.5/5] Ensuring LIVE Production Mode (APP_MODE=PRODUCTION, INDUSTRIAL_PROTOCOL=SIEMENS_S7, INDUSTRIAL_WRITE_ENABLED=true) in backend\.env...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$envFile = Join-Path '%~dp0backend' '.env';" ^
   "if (Test-Path $envFile) {" ^
   "  $c = Get-Content $envFile -Raw;" ^
-  "  if ($c -match '(?m)^APP_MODE=') { $c = $c -replace '(?m)^APP_MODE=.*$', 'APP_MODE=LIVE' } else { $c = \"APP_MODE=LIVE`r`n\" + $c };" ^
+  "  if ($c -match '(?m)^APP_MODE=') { $c = $c -replace '(?m)^APP_MODE=.*$', 'APP_MODE=PRODUCTION' } else { $c = \"APP_MODE=PRODUCTION`r`n\" + $c };" ^
+  "  if ($c -match '(?m)^INDUSTRIAL_PROTOCOL=') { $c = $c -replace '(?m)^INDUSTRIAL_PROTOCOL=.*$', 'INDUSTRIAL_PROTOCOL=SIEMENS_S7' } else { $c = $c + \"`r`nINDUSTRIAL_PROTOCOL=SIEMENS_S7`r`n\" };" ^
   "  if ($c -match '(?m)^INDUSTRIAL_WRITE_ENABLED=') { $c = $c -replace '(?m)^INDUSTRIAL_WRITE_ENABLED=.*$', 'INDUSTRIAL_WRITE_ENABLED=true' } else { $c = $c + \"`r`nINDUSTRIAL_WRITE_ENABLED=true`r`n\" };" ^
   "  Set-Content -Path $envFile -Value $c -NoNewline;" ^
-  "  Write-Host 'LIVE Mode enforced in backend\.env (APP_MODE=LIVE, INDUSTRIAL_WRITE_ENABLED=true)!' -ForegroundColor Green" ^
+  "  Write-Host 'PRODUCTION LIVE Mode enforced in backend\.env (APP_MODE=PRODUCTION, SIEMENS_S7, WRITE=true)!' -ForegroundColor Green" ^
   "}"
 
 echo.
