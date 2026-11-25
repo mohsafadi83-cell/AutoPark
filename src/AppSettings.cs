@@ -1269,11 +1269,15 @@ namespace AutoPark
                 }
                 catch { }
 
-                // Sync physical Emergency Stop upward if PLC asserts it
+                // Sync Emergency Stop bidirectionally with the live PLC so software E-Stop never stays stuck/hung
                 if (Sensors.LiveConnected && Sensors.EmergencyPhysical && !EmergencyStop)
                 {
                     EmergencyStop = true;
                     EnsureAlarmActive("PLC_EMERGENCY_STOP", "EMERGENCY", "تم رصد إيقاف طوارئ فعلي من الـ PLC (ES1/ES2)", "PLC_S7_1200");
+                }
+                else if (Sensors.LiveConnected && !Sensors.EmergencyPhysical && EmergencyStop)
+                {
+                    EmergencyStop = false;
                 }
                 if (Sensors.LiveConnected && Sensors.ErrorInPosition)
                     EnsureAlarmActive("PLC_ERROR_IN_POSITION", "CRITICAL", "خطأ في تموضع المصعد (Alarm Section Bit 11)", "PLC_S7_1200");

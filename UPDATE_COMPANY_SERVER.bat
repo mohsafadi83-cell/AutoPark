@@ -26,6 +26,8 @@ if exist "%~dp0.git" (
     "Copy-Item (Join-Path $src 'backend\tsconfig*.json') (Join-Path $dst 'backend') -Force;" ^
     "Copy-Item (Join-Path $src 'backend\nest-cli.json') (Join-Path $dst 'backend') -Force;" ^
     "Copy-Item (Join-Path $src 'backend\package.json') (Join-Path $dst 'backend') -Force;" ^
+    "if (Test-Path (Join-Path $src 'admin\src')) { Copy-Item (Join-Path $src 'admin\src') (Join-Path $dst 'admin') -Recurse -Force };" ^
+    "if (Test-Path (Join-Path $src 'mobile\build\web')) { New-Item -ItemType Directory -Force -Path (Join-Path $dst 'mobile\build\web') | Out-Null; Copy-Item (Join-Path $src 'mobile\build\web\*') (Join-Path $dst 'mobile\build\web') -Recurse -Force };" ^
     "Copy-Item (Join-Path $src 'UPDATE_COMPANY_SERVER.bat') $dst -Force;" ^
     "Write-Host 'Source synced cleanly (.env and database preserved)!' -ForegroundColor Green"
   if errorlevel 1 (

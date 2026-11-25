@@ -610,6 +610,9 @@ namespace AutoPark
         readonly List<int> _stepFloors = new List<int>();
         int _stepIndex = 0;
         int _waitTicks = 0;
+        DateTime _waitStartUtc = DateTime.MinValue;
+        DateTime _pauseStartUtc = DateTime.MinValue;
+        double _pausedTotalSec = 0;
         bool _cancelled = false;
         volatile bool _backendDispatched = false;
         volatile bool _sensorPollInFlight = false;
@@ -841,6 +844,15 @@ namespace AutoPark
                 var ps = ParkState.Instance;
                 _timerPaused = !_timerPaused;
                 bool pausedNow = _timerPaused;
+                if (pausedNow)
+                {
+                    _pauseStartUtc = DateTime.UtcNow;
+                }
+                else if (_pauseStartUtc != DateTime.MinValue)
+                {
+                    _pausedTotalSec += (DateTime.UtcNow - _pauseStartUtc).TotalSeconds;
+                    _pauseStartUtc = DateTime.MinValue;
+                }
                 _btnPauseTimer.Text = pausedNow
                     ? Loc.T("▶ Resume", "▶ استئناف")
                     : Loc.T("⏸ Pause", "⏸ إيقاف مؤقت");
@@ -1177,18 +1189,24 @@ namespace AutoPark
                             finally { _sensorPollInFlight = false; }
                         });
                     }
-                    // STRICT physical limit switch check: NEVER declare arrival while the lift is still moving!
+                    // STRICT physical limit switch check with real wall-clock elapsed seconds (30s compact window)
                     bool lsReached = st.Sensors.LimitSwitches[lane - 1, stepCode - 1];
                     bool reached = lsReached;
-
-                    if (!reached && _waitTicks < 45)
+                    if (_waitStartUtc == DateTime.MinValue)
                     {
-                        _waitTicks++;
+                        _waitStartUtc = DateTime.UtcNow;
+                        _pausedTotalSec = 0;
+                    }
+                    int elapsedSec = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - _waitStartUtc).TotalSeconds - _pausedTotalSec));
+
+                    if (!reached && elapsedSec < 30)
+                    {
+                        _waitTicks = elapsedSec;
                         _lblElevatorPos.ForeColor = Theme.Amber;
                         string lsName = "PL" + lane + "_LS_" + (stepCode == 3 ? "TOP" : (stepCode == 2 ? "MID" : "BTM"));
                         _lblElevatorPos.Text = Loc.T(
-                            "⏳ Lifting to Floor P" + stepCode + " — waiting for PLC sensor " + lsName + " (" + _waitTicks + "/45s)...",
-                            "⏳ جاري تحريك المصعد للطابق P" + stepCode + " — بانتظار الحساس الفعلي " + lsName + " (" + _waitTicks + "/45 ث)...");
+                            "⏳ Lifting to Floor P" + stepCode + " — waiting for PLC sensor " + lsName + " (" + elapsedSec + "/30s)...",
+                            "⏳ جاري تحريك المصعد للطابق P" + stepCode + " — بانتظار الحساس الفعلي " + lsName + " (" + elapsedSec + "/30 ث)...");
                         return;
                     }
                     if (!reached)
@@ -1252,6 +1270,8 @@ namespace AutoPark
                 }
 
                 _waitTicks = 0;
+                _waitStartUtc = DateTime.MinValue;
+                _pausedTotalSec = 0;
                 _lblStepStatus.Text = _dynamicSteps[_stepIndex];
                 _progress.Value = _stepIndex + 1;
 
