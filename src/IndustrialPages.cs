@@ -1,11 +1,82 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Threading;
 using System.Windows.Forms;
 
 namespace AutoPark
 {
+    /// <summary>
+    /// Clean, soft geometric circular LED indicator lamp (no verbose text inside).
+    /// </summary>
+    class LampIndicator : Panel
+    {
+        Color _lampColor = Color.FromArgb(203, 213, 225);
+        Color _ringColor = Color.FromArgb(148, 163, 184);
+        bool _isOn = false;
+        int _diameter = 18;
+
+        public LampIndicator(int diameter = 18)
+        {
+            _diameter = diameter;
+            DoubleBuffered = true;
+            BackColor = Color.Transparent;
+            Dock = DockStyle.Fill;
+            Margin = new Padding(2);
+        }
+
+        public void SetState(bool on, Color onColor, Color offColor, Color offRing)
+        {
+            bool changed = (_isOn != on) || (_lampColor != (on ? onColor : offColor));
+            _isOn = on;
+            _lampColor = on ? onColor : offColor;
+            _ringColor = on ? ControlPaint.Dark(onColor, 0.15f) : offRing;
+            if (changed) Invalidate();
+        }
+
+        public void SetGreen(bool on)
+        {
+            SetState(on, Color.FromArgb(34, 197, 94), Color.FromArgb(226, 232, 240), Color.FromArgb(148, 163, 184));
+        }
+
+        public void SetRed(bool on)
+        {
+            SetState(on, Color.FromArgb(239, 68, 68), Color.FromArgb(226, 232, 240), Color.FromArgb(148, 163, 184));
+        }
+
+        public void SetAmber(bool on)
+        {
+            SetState(on, Color.FromArgb(245, 158, 11), Color.FromArgb(226, 232, 240), Color.FromArgb(148, 163, 184));
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            int d = Math.Min(_diameter, Math.Min(Width - 6, Height - 6));
+            if (d < 8) d = 8;
+            int x = (Width - d) / 2;
+            int y = (Height - d) / 2;
+
+            if (_isOn)
+            {
+                using (var glow = new SolidBrush(Color.FromArgb(55, _lampColor)))
+                    g.FillEllipse(glow, x - 3, y - 3, d + 6, d + 6);
+            }
+            using (var fill = new SolidBrush(_lampColor))
+                g.FillEllipse(fill, x, y, d, d);
+            using (var pen = new Pen(_ringColor, 1.4f))
+                g.DrawEllipse(pen, x, y, d, d);
+            if (_isOn)
+            {
+                using (var shine = new SolidBrush(Color.FromArgb(130, 255, 255, 255)))
+                    g.FillEllipse(shine, x + d / 4, y + d / 5, Math.Max(3, d / 3), Math.Max(2, d / 4));
+            }
+        }
+    }
+
     /// <summary>
     /// Live Sensor & Limit-Switch Monitor (Status Monitor — 4 Lanes × 3 Floors + MG_PROT + Safety Interlocks).
     /// </summary>
@@ -13,6 +84,7 @@ namespace AutoPark
     {
         readonly MainForm _shell;
         readonly System.Windows.Forms.Timer _refreshTimer;
+        readonly ToolTip _tips = new ToolTip();
         readonly Label _lblModeBanner;
         readonly Label _lblPhotocell;
         readonly Label _lblPhotocellOut;
@@ -26,9 +98,9 @@ namespace AutoPark
         readonly Panel _maintPanel;
         readonly Label[] _rawInLeds = new Label[32];
         readonly Label _lblRawIoLine;
-        readonly Label[,] _lsCells = new Label[4, 3]; // [lane 0..3, 0=BTM(P1), 1=MID(P2), 2=TOP(P3)]
-        readonly Label[] _mgCells = new Label[4];
-        readonly Label[] _locCells = new Label[4];
+        readonly LampIndicator[,] _lsCells = new LampIndicator[4, 3]; // [lane 0..3, 0=BTM(P1), 1=MID(P2), 2=TOP(P3)]
+        readonly LampIndicator[] _mgCells = new LampIndicator[4];
+        readonly LampIndicator[] _locCells = new LampIndicator[4];
         readonly Label _lblAlarmRegs;
 
         public SensorMonitorPage(MainForm shell)
@@ -238,11 +310,11 @@ namespace AutoPark
 
             for (int lane = 0; lane < 4; lane++)
             {
-                _lsCells[lane, 2] = MakeLedCell("PL" + (lane + 1) + "_LS_TOP");
-                _lsCells[lane, 1] = MakeLedCell("PL" + (lane + 1) + "_LS_MID");
-                _lsCells[lane, 0] = MakeLedCell("PL" + (lane + 1) + "_LS_BTM");
-                _mgCells[lane] = MakeLedCell("PL" + (lane + 1) + "_MG_PROT");
-                _locCells[lane] = MakeLedCell("Lane" + (lane + 1) + "_check");
+                _lsCells[lane, 2] = MakeLampCell("PL" + (lane + 1) + "_LS_TOP");
+                _lsCells[lane, 1] = MakeLampCell("PL" + (lane + 1) + "_LS_MID");
+                _lsCells[lane, 0] = MakeLampCell("PL" + (lane + 1) + "_LS_BTM");
+                _mgCells[lane] = MakeLampCell("PL" + (lane + 1) + "_MG_PROT");
+                _locCells[lane] = MakeLampCell("Lane" + (lane + 1) + "_check");
 
                 tbl.Controls.Add(_lsCells[lane, 2], lane + 1, 1);
                 tbl.Controls.Add(_lsCells[lane, 1], lane + 1, 2);
@@ -351,18 +423,13 @@ namespace AutoPark
             return l;
         }
 
-        Label MakeLedCell(string tagName)
+        LampIndicator MakeLampCell(string tooltipTag)
         {
-            return new Label
-            {
-                Text = "● " + tagName,
-                Font = Theme.Bold(9.5f),
-                TextAlign = ContentAlignment.MiddleCenter,
-                Dock = DockStyle.Fill,
-                Margin = new Padding(4, 6, 4, 6),
-                BackColor = Theme.Back,
-                ForeColor = Theme.Muted
-            };
+            var lamp = new LampIndicator(20);
+            lamp.BackColor = Color.FromArgb(248, 250, 252);
+            lamp.Margin = new Padding(4, 4, 4, 4);
+            _tips.SetToolTip(lamp, tooltipTag);
+            return lamp;
         }
 
         void PollAndRender(bool immediate)
@@ -451,43 +518,35 @@ namespace AutoPark
                 bool lsMapped = s.LsMapped[lane];
                 for (int lv = 0; lv < 3; lv++)
                 {
-                    string tagSuffix = lv == 2 ? "LS_TOP" : (lv == 1 ? "LS_MID" : "LS_BTM");
-                    string tagLabel = "PL" + (lane + 1) + "_" + tagSuffix;
                     var cell = _lsCells[lane, lv];
                     if (s.LiveConnected && !lsMapped)
                     {
-                        cell.Text = Loc.T("⚙ %I Unmapped — ", "⚙ غير مربوط (%I) — ") + tagLabel;
+                        cell.SetAmber(true);
                         cell.BackColor = Theme.AmberSoft;
-                        cell.ForeColor = Theme.Amber;
                     }
                     else
                     {
                         bool on = s.LimitSwitches[lane, lv];
-                        cell.Text = (on ? "🟢 ON — " : "⚪ OFF — ") + tagLabel;
-                        cell.BackColor = on ? Theme.OkSoft : Theme.Back;
-                        cell.ForeColor = on ? Theme.Ok : Theme.Muted;
+                        cell.SetGreen(on);
+                        cell.BackColor = on ? Color.FromArgb(236, 253, 245) : Color.FromArgb(248, 250, 252);
                     }
                 }
 
                 if (s.LiveConnected && !s.MgProtMapped[lane])
                 {
-                    _mgCells[lane].Text = Loc.T("⚙ %I Unmapped (MG_PROT)", "⚙ غير مربوط (%I)");
+                    _mgCells[lane].SetAmber(true);
                     _mgCells[lane].BackColor = Theme.AmberSoft;
-                    _mgCells[lane].ForeColor = Theme.Amber;
                 }
                 else
                 {
-                    // MG_PROT polarity is not documented; show the raw %I state neutrally (no assumed safe/tripped meaning)
                     bool mg = s.MgProt[lane];
-                    _mgCells[lane].Text = mg ? Loc.T("🟢 Input ON (1)", "🟢 المدخل ON (1)") : Loc.T("⚪ Input OFF (0)", "⚪ المدخل OFF (0)");
-                    _mgCells[lane].BackColor = mg ? Theme.OkSoft : Theme.Back;
-                    _mgCells[lane].ForeColor = mg ? Theme.Ok : Theme.Muted;
+                    _mgCells[lane].SetRed(mg);
+                    _mgCells[lane].BackColor = mg ? Theme.ErrSoft : Color.FromArgb(248, 250, 252);
                 }
 
                 bool loc = s.CheckLocation[lane];
-                _locCells[lane].Text = loc ? Loc.T("🟢 Triggered (1)", "🟢 مفعّل (1)") : Loc.T("⚪ Idle (0)", "⚪ خامل (0)");
-                _locCells[lane].BackColor = loc ? Theme.OkSoft : Theme.Back;
-                _locCells[lane].ForeColor = loc ? Theme.Ok : Theme.Muted;
+                _locCells[lane].SetGreen(loc);
+                _locCells[lane].BackColor = loc ? Color.FromArgb(236, 253, 245) : Color.FromArgb(248, 250, 252);
             }
 
             _lblAlarmRegs.Text = string.Format(
@@ -497,6 +556,427 @@ namespace AutoPark
                 s.AlarmSection,
                 s.ManualMode ? Loc.T("Manual", "يدوي") : Loc.T("Auto", "تلقائي")
             );
+        }
+    }
+
+    /// <summary>
+    /// Modern Geometric Live Status Monitor (upgraded reference of legacy Siemens KTP400 Status Monitor Screen).
+    /// Always visible alongside Manual controls (zero scrolling) and tracks both Manual & Automatic live states.
+    /// </summary>
+    class LiveStatusMonitorCard : Card
+    {
+        readonly MainForm _shell;
+        readonly System.Windows.Forms.Timer _timer;
+        readonly ToolTip _tips = new ToolTip();
+        readonly LampIndicator _lampI01;
+        readonly LampIndicator _lampInOut;
+        readonly LampIndicator _lampI02;
+        readonly Label _lblPhotoBanner;
+        readonly Label _lblModePill;
+        readonly Label _lblAutoTrack;
+        readonly LampIndicator[,] _lsLamps = new LampIndicator[4, 3]; // [lane 0..3, 0=BTM, 1=MID, 2=TOP]
+        readonly LampIndicator[] _mgLamps = new LampIndicator[4];
+        readonly Panel[] _autoStepLeds = new Panel[13];
+        readonly ModernButton _btnCancelIn;
+        readonly ModernButton _btnCancelOut;
+        bool _cancelInOn = false;
+        bool _cancelOutOn = false;
+
+        public LiveStatusMonitorCard(MainForm shell, Action onSoftRecoveryClick)
+        {
+            _shell = shell;
+            Dock = DockStyle.Fill;
+            Padding = new Padding(12, 10, 12, 10);
+            Margin = new Padding(6);
+
+            // Header: Title + Live Mode Pill (AUTO / MANUAL / E-STOP)
+            var hdr = new Panel { Dock = DockStyle.Top, Height = 30 };
+            var lblTitle = Theme.Label(
+                Loc.T("📡 Live Status Monitor (Auto & Manual)", "📡 شاشة مراقبة الحالة الحية (تلقائي ويدوي)"),
+                Theme.Bold(9.8f), Theme.Primary);
+            lblTitle.Dock = DockStyle.Fill;
+            _lblModePill = new Label
+            {
+                Text = "● AUTO",
+                Font = Theme.Bold(8.8f),
+                ForeColor = Theme.Ok,
+                BackColor = Theme.OkSoft,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Right,
+                Width = 110
+            };
+            hdr.Controls.Add(lblTitle);
+            hdr.Controls.Add(_lblModePill);
+
+            // Photocell Top Strip (I0.1 | Banner | In+Out | I0.2) — mirrors Image 3 cleanly
+            var photoBar = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 40,
+                ColumnCount = 4,
+                RowCount = 1,
+                Padding = new Padding(0, 4, 0, 4),
+                RightToLeft = RightToLeft.No
+            };
+            photoBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52f));
+            photoBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            photoBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62f));
+            photoBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52f));
+
+            _lampI01 = new LampIndicator(14);
+            _tips.SetToolTip(_lampI01, "I0.1 — Photocell Inside");
+            _lampInOut = new LampIndicator(14);
+            _tips.SetToolTip(_lampInOut, "In + Out Photocell Combined");
+            _lampI02 = new LampIndicator(14);
+            _tips.SetToolTip(_lampI02, "I0.2 — Photocell Outside");
+
+            _lblPhotoBanner = new Label
+            {
+                Text = Loc.T("Photocell: Entrance Clear", "حساس المدخل: المسار فارغ وآمن"),
+                Font = Theme.Bold(8.8f),
+                ForeColor = Theme.Ok,
+                BackColor = Theme.OkSoft,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Fill,
+                Margin = new Padding(4, 2, 4, 2)
+            };
+
+            photoBar.Controls.Add(WrapLabeledLamp(_lampI01, "I0.1"), 0, 0);
+            photoBar.Controls.Add(_lblPhotoBanner, 1, 0);
+            photoBar.Controls.Add(WrapLabeledLamp(_lampInOut, "In+Out"), 2, 0);
+            photoBar.Controls.Add(WrapLabeledLamp(_lampI02, "I0.2"), 3, 0);
+
+            // Center Geometric Lamp Matrix (TOP / MID / BTM + MG_PROT across Lanes 1..4 — pure indicator lamps, no text!)
+            var lampGrid = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 148,
+                ColumnCount = 5,
+                RowCount = 5,
+                Padding = new Padding(0, 4, 0, 4),
+                RightToLeft = RightToLeft.No
+            };
+            lampGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 76f));
+            for (int c = 1; c <= 4; c++) lampGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+            lampGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
+            for (int r = 1; r <= 4; r++) lampGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 25f));
+
+            lampGrid.Controls.Add(MakeMiniHdr(""), 0, 0);
+            for (int lane = 1; lane <= 4; lane++) lampGrid.Controls.Add(MakeMiniHdr("L" + lane), lane, 0);
+
+            lampGrid.Controls.Add(MakeMiniRow("TOP (P3)"), 0, 1);
+            lampGrid.Controls.Add(MakeMiniRow("MID (P2)"), 0, 2);
+            lampGrid.Controls.Add(MakeMiniRow("BTM (P1)"), 0, 3);
+            lampGrid.Controls.Add(MakeMiniRow("MG_PROT"), 0, 4);
+
+            for (int lane = 0; lane < 4; lane++)
+            {
+                _lsLamps[lane, 2] = MakeCleanLamp("PL" + (lane + 1) + "_LS_TOP");
+                _lsLamps[lane, 1] = MakeCleanLamp("PL" + (lane + 1) + "_LS_MID");
+                _lsLamps[lane, 0] = MakeCleanLamp("PL" + (lane + 1) + "_LS_BTM");
+                _mgLamps[lane] = MakeCleanLamp("PL" + (lane + 1) + "_MG_PROT");
+
+                lampGrid.Controls.Add(_lsLamps[lane, 2], lane + 1, 1);
+                lampGrid.Controls.Add(_lsLamps[lane, 1], lane + 1, 2);
+                lampGrid.Controls.Add(_lsLamps[lane, 0], lane + 1, 3);
+                lampGrid.Controls.Add(_mgLamps[lane], lane + 1, 4);
+            }
+
+            // Live Automatic & Manual Tracking Strip
+            _lblAutoTrack = Theme.Label(
+                Loc.T("Auto/Manual Live: Waiting for PLC telemetry...", "الحالة الحية: بانتظار بيانات الـ PLC..."),
+                Theme.Semi(8.6f), Theme.Ink);
+            _lblAutoTrack.Dock = DockStyle.Top;
+            _lblAutoTrack.Height = 22;
+
+            // Automatic Mode Steps 1..13 LEDs (modern compact version of Image 3 bottom bar)
+            var stepsTitle = Theme.Label(
+                Loc.T("Automatic Mode Steps (1–13):", "خطوات الوضع التلقائي (1–13):"),
+                Theme.Semi(8.2f), Theme.Muted);
+            stepsTitle.Dock = DockStyle.Top;
+            stepsTitle.Height = 16;
+
+            var stepsRow = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 34,
+                ColumnCount = 13,
+                RowCount = 1,
+                Padding = new Padding(0, 2, 0, 2),
+                RightToLeft = RightToLeft.No
+            };
+            for (int i = 0; i < 13; i++)
+            {
+                stepsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 13f));
+                var box = new Panel
+                {
+                    Dock = DockStyle.Fill,
+                    Margin = new Padding(2),
+                    BackColor = Color.FromArgb(226, 232, 240)
+                };
+                var num = new Label
+                {
+                    Text = (i + 1).ToString(),
+                    Font = Theme.Bold(7.5f),
+                    ForeColor = Theme.Ink,
+                    Dock = DockStyle.Fill,
+                    TextAlign = ContentAlignment.MiddleCenter
+                };
+                box.Controls.Add(num);
+                _autoStepLeds[i] = box;
+                stepsRow.Controls.Add(box, i, 0);
+            }
+
+            // Bottom Quick Action Row: Cancel PhotoCell In | Cancel PhotoCell Out | Safe Reset | Soft Recovery
+            var quickRow = new TableLayoutPanel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 36,
+                ColumnCount = 4,
+                RowCount = 1,
+                Padding = new Padding(0, 4, 0, 0)
+            };
+            for (int c = 0; c < 4; c++) quickRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+
+            _btnCancelIn = new ModernButton
+            {
+                Text = Loc.T("Bypass In", "تجاوز داخلي"),
+                BaseColor = Color.FromArgb(71, 85, 105),
+                HoverColor = Color.FromArgb(51, 65, 85),
+                Dock = DockStyle.Fill,
+                Margin = new Padding(2, 0, 2, 0)
+            };
+            _btnCancelIn.Click += delegate { TogglePhotocellBypass(true); };
+
+            _btnCancelOut = new ModernButton
+            {
+                Text = Loc.T("Bypass Out", "تجاوز خارجي"),
+                BaseColor = Color.FromArgb(71, 85, 105),
+                HoverColor = Color.FromArgb(51, 65, 85),
+                Dock = DockStyle.Fill,
+                Margin = new Padding(2, 0, 2, 0)
+            };
+            _btnCancelOut.Click += delegate { TogglePhotocellBypass(false); };
+
+            var btnReset = new ModernButton
+            {
+                Text = Loc.T("Safe Reset", "إعادة ضبط"),
+                BaseColor = Theme.Blue,
+                HoverColor = Color.FromArgb(29, 78, 216),
+                Dock = DockStyle.Fill,
+                Margin = new Padding(2, 0, 2, 0)
+            };
+            btnReset.Click += delegate
+            {
+                ThreadPool.QueueUserWorkItem(delegate { ParkState.Instance.SendRecoveryAction("SAFE_RESET"); });
+                _lblAutoTrack.Text = Loc.T("✅ Safe PLC Reset pulse (ParkDB.Reset) sent.", "✅ تم إرسال نبضة إعادة الضبط الآمنة.");
+            };
+
+            var btnSoftRec = new ModernButton
+            {
+                Text = Loc.T("🔄 Soft Recover", "🔄 إنعاش PLC"),
+                BaseColor = Theme.Amber,
+                HoverColor = Color.FromArgb(180, 83, 9),
+                Dock = DockStyle.Fill,
+                Margin = new Padding(2, 0, 2, 0)
+            };
+            btnSoftRec.Click += delegate { if (onSoftRecoveryClick != null) onSoftRecoveryClick(); };
+
+            quickRow.Controls.Add(_btnCancelIn, 0, 0);
+            quickRow.Controls.Add(_btnCancelOut, 1, 0);
+            quickRow.Controls.Add(btnReset, 2, 0);
+            quickRow.Controls.Add(btnSoftRec, 3, 0);
+
+            Controls.Add(quickRow);
+            Controls.Add(stepsRow);
+            Controls.Add(stepsTitle);
+            Controls.Add(_lblAutoTrack);
+            Controls.Add(lampGrid);
+            Controls.Add(photoBar);
+            Controls.Add(hdr);
+
+            _timer = new System.Windows.Forms.Timer { Interval = 1000 };
+            _timer.Tick += delegate { PollAndUpdate(); };
+            _timer.Start();
+            Disposed += delegate { _timer.Stop(); };
+            RenderNow();
+        }
+
+        Panel WrapLabeledLamp(LampIndicator lamp, string text)
+        {
+            var p = new Panel { Dock = DockStyle.Fill, Margin = new Padding(1) };
+            var lbl = new Label
+            {
+                Text = text,
+                Font = Theme.Bold(7.2f),
+                ForeColor = Theme.Muted,
+                Dock = DockStyle.Bottom,
+                Height = 13,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            p.Controls.Add(lamp);
+            p.Controls.Add(lbl);
+            return p;
+        }
+
+        LampIndicator MakeCleanLamp(string tip)
+        {
+            var l = new LampIndicator(18);
+            l.BackColor = Color.FromArgb(248, 250, 252);
+            l.Margin = new Padding(3, 2, 3, 2);
+            _tips.SetToolTip(l, tip);
+            return l;
+        }
+
+        Label MakeMiniHdr(string text)
+        {
+            return new Label
+            {
+                Text = text,
+                Font = Theme.Bold(8.5f),
+                ForeColor = Theme.Primary,
+                BackColor = Theme.PrimarySoft,
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Margin = new Padding(3, 1, 3, 1)
+            };
+        }
+
+        Label MakeMiniRow(string text)
+        {
+            return new Label
+            {
+                Text = text,
+                Font = Theme.Bold(8.2f),
+                ForeColor = Theme.Ink,
+                BackColor = Theme.Back,
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(4, 0, 0, 0),
+                Margin = new Padding(2)
+            };
+        }
+
+        void TogglePhotocellBypass(bool inside)
+        {
+            bool next = inside ? !_cancelInOn : !_cancelOutOn;
+            string key = inside ? "cancel_inside_sensor_tag" : "cancel_outside_sensor_tag";
+            if (next)
+            {
+                var ok = Loc.ShowMsg(
+                    "Bypassing a photocell sensor is for supervised maintenance only. Confirm bypass?",
+                    "تجاوز حساس الفوتوسيل مخصص للصيانة تحت إشراف فقط. هل تؤكد التجاوز؟",
+                    "Photocell Bypass", "تجاوز الحساس",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                if (ok != DialogResult.Yes) return;
+            }
+            if (inside)
+            {
+                _cancelInOn = next;
+                _btnCancelIn.BaseColor = next ? Theme.Amber : Color.FromArgb(71, 85, 105);
+            }
+            else
+            {
+                _cancelOutOn = next;
+                _btnCancelOut.BaseColor = next ? Theme.Amber : Color.FromArgb(71, 85, 105);
+            }
+            ThreadPool.QueueUserWorkItem(delegate { ParkState.Instance.SendManualControl(key, next); });
+        }
+
+        void PollAndUpdate()
+        {
+            if (IsDisposed) return;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                ParkState.Instance.PullSensorsFromBackend();
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    try { BeginInvoke((Action)RenderNow); } catch { }
+                }
+            });
+        }
+
+        public void RenderNow()
+        {
+            if (IsDisposed) return;
+            var s = ParkState.Instance.Sensors;
+
+            bool estop = ParkState.Instance.EmergencyStop || s.EmergencyPhysical;
+            if (estop)
+            {
+                _lblModePill.Text = "● E-STOP";
+                _lblModePill.BackColor = Theme.ErrSoft;
+                _lblModePill.ForeColor = Theme.Err;
+            }
+            else if (s.ManualMode)
+            {
+                _lblModePill.Text = "● MANUAL";
+                _lblModePill.BackColor = Theme.AmberSoft;
+                _lblModePill.ForeColor = Theme.Amber;
+            }
+            else
+            {
+                _lblModePill.Text = "● AUTO";
+                _lblModePill.BackColor = Theme.OkSoft;
+                _lblModePill.ForeColor = Theme.Ok;
+            }
+
+            bool inBlocked = !s.PhotocellClear;
+            bool outBlocked = !s.PcellOutsideClear;
+            _lampI01.SetRed(inBlocked);
+            _lampI02.SetRed(outBlocked);
+            _lampInOut.SetRed(inBlocked || outBlocked);
+
+            if (inBlocked || outBlocked)
+            {
+                _lblPhotoBanner.Text = Loc.T("⚠ Something at entrance", "⚠ يوجد جسم/مركبة عند المدخل");
+                _lblPhotoBanner.BackColor = Theme.AmberSoft;
+                _lblPhotoBanner.ForeColor = Theme.Amber;
+            }
+            else
+            {
+                _lblPhotoBanner.Text = Loc.T("Entrance Clear", "المدخل فارغ وآمن");
+                _lblPhotoBanner.BackColor = Theme.OkSoft;
+                _lblPhotoBanner.ForeColor = Theme.Ok;
+            }
+
+            for (int lane = 0; lane < 4; lane++)
+            {
+                for (int lv = 0; lv < 3; lv++)
+                {
+                    bool on = s.LimitSwitches[lane, lv];
+                    _lsLamps[lane, lv].SetGreen(on);
+                    _lsLamps[lane, lv].BackColor = on ? Color.FromArgb(236, 253, 245) : Color.FromArgb(248, 250, 252);
+                }
+                bool mg = s.MgProt[lane];
+                _mgLamps[lane].SetRed(mg);
+                _mgLamps[lane].BackColor = mg ? Theme.ErrSoft : Color.FromArgb(248, 250, 252);
+            }
+
+            string floors = string.Format("L1:P{0}  L2:P{1}  L3:P{2}  L4:P{3}  |  Alarms:{4}",
+                s.CurrentFloor[0], s.CurrentFloor[1], s.CurrentFloor[2], s.CurrentFloor[3], s.AlarmWord);
+            _lblAutoTrack.Text = (s.LiveConnected ? "🟢 " : "⚪ ") + floors;
+
+            // Map live Automatic Mode progress onto Steps 1..13 LEDs
+            int activeStep = 0;
+            if (s.AutoMode)
+            {
+                if (s.Step2Done) activeStep = 13;
+                else if (s.Step2Ok) activeStep = 11;
+                else if (s.Step2Ready) activeStep = 9;
+                else if (s.Step1Done) activeStep = 7;
+                else if (s.Step1Ok) activeStep = 5;
+                else if (s.Step1Ready) activeStep = 3;
+                else activeStep = 1;
+            }
+            for (int i = 0; i < 13; i++)
+            {
+                bool lit = (activeStep > 0) && (i + 1 <= activeStep);
+                bool current = (i + 1 == activeStep);
+                _autoStepLeds[i].BackColor = current
+                    ? Color.FromArgb(34, 197, 94)
+                    : (lit ? Color.FromArgb(134, 239, 172) : Color.FromArgb(226, 232, 240));
+            }
         }
     }
 
@@ -516,7 +996,12 @@ namespace AutoPark
         readonly Label _lblStatus;
         readonly ModernButton _btnModeAuto;
         readonly ModernButton _btnModeManual;
-        readonly Panel _controlsContainer;
+        readonly ModernButton _btnToggleSlots;
+        readonly ModernButton _btnToggleMatrix;
+        readonly Panel _manualControlsHost;
+        readonly Panel _slotsDrawer;
+        readonly Panel _matrixDrawer;
+        readonly LiveStatusMonitorCard _liveMonitor;
         readonly Dictionary<string, bool> _toggleStates = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, ToggleBtnInfo> _toggleButtons = new Dictionary<string, ToggleBtnInfo>(StringComparer.OrdinalIgnoreCase);
         string _activeMomentaryKey = null;
@@ -557,10 +1042,10 @@ namespace AutoPark
             lblWarn.Dock = DockStyle.Fill;
             warnBar.Controls.Add(lblWarn);
 
-            var modeBar = new Panel { Dock = DockStyle.Top, Height = 56, Padding = new Padding(0, 6, 0, 6) };
+            var modeBar = new Panel { Dock = DockStyle.Top, Height = 52, Padding = new Padding(0, 4, 0, 4) };
             _btnModeManual = new ModernButton
             {
-                Text = Loc.T("Enable Manual Mode", "تفعيل الوضع اليدوي (Manual)"),
+                Text = Loc.T("Manual Mode", "الوضع اليدوي"),
                 IconGlyph = Icons.Settings,
                 BaseColor = Theme.Amber,
                 HoverColor = Color.FromArgb(180, 83, 9)
@@ -569,16 +1054,41 @@ namespace AutoPark
 
             _btnModeAuto = new ModernButton
             {
-                Text = Loc.T("Return to Auto Mode", "العودة للوضع التلقائي (Auto)"),
+                Text = Loc.T("Auto Mode", "الوضع التلقائي"),
                 IconGlyph = Icons.Check,
                 BaseColor = Theme.Ok,
                 HoverColor = Color.FromArgb(21, 128, 61)
             };
             _btnModeAuto.Click += delegate { SetManualMode(false); };
 
+            // Section 1 & Section 2 sleek show/hide toggle buttons right beside each other
+            _btnToggleSlots = new ModernButton
+            {
+                Text = Loc.T("👁 Slot Reset", "👁 تصفير المواقف"),
+                BaseColor = Color.FromArgb(71, 85, 105),
+                HoverColor = Color.FromArgb(51, 65, 85)
+            };
+            _btnToggleSlots.Click += delegate
+            {
+                _slotsDrawer.Visible = !_slotsDrawer.Visible;
+                _btnToggleSlots.BaseColor = _slotsDrawer.Visible ? Theme.Primary : Color.FromArgb(71, 85, 105);
+            };
+
+            _btnToggleMatrix = new ModernButton
+            {
+                Text = Loc.T("👁 Limit Matrix", "👁 مصفوفة الحساسات"),
+                BaseColor = Color.FromArgb(71, 85, 105),
+                HoverColor = Color.FromArgb(51, 65, 85)
+            };
+            _btnToggleMatrix.Click += delegate
+            {
+                _matrixDrawer.Visible = !_matrixDrawer.Visible;
+                _btnToggleMatrix.BaseColor = _matrixDrawer.Visible ? Theme.Primary : Color.FromArgb(71, 85, 105);
+            };
+
             var btnStopAll = new ModernButton
             {
-                Text = Loc.T("🛑 Stop All Outputs", "🛑 إيقاف جميع المخارج فوراً"),
+                Text = Loc.T("🛑 Stop All", "🛑 إيقاف الكل"),
                 IconGlyph = Icons.Shield,
                 BaseColor = Theme.Err,
                 HoverColor = Color.FromArgb(185, 28, 28)
@@ -586,28 +1096,32 @@ namespace AutoPark
             btnStopAll.Click += delegate { ReleaseAllOutputs(Loc.T("Immediate stop of all manual outputs", "إيقاف فوري لجميع المخارج اليدوية")); };
 
             _lblStatus = Theme.Label(
-                Loc.T("Current Mode: Auto — Enable Manual Mode to operate maintenance controls.",
-                      "الوضع الحالي: تلقائي (Auto Mode) — فعّل الوضع اليدوي لاستخدام أزرار الصيانة."),
-                Theme.Semi(10f), Theme.Ink);
+                Loc.T("Auto Mode — Live Status Monitor active. Enable Manual Mode for direct controls.",
+                      "الوضع التلقائي — شاشة المراقبة الحية نشطة. فعّل الوضع اليدوي للتحكم المباشر."),
+                Theme.Semi(9.2f), Theme.Ink);
             _lblStatus.Dock = DockStyle.Fill;
 
             modeBar.Controls.Add(_lblStatus);
-            modeBar.Controls.Add(Theme.Holder(_btnModeManual, startDock, 220, new Padding(6, 2, 6, 2)));
-            modeBar.Controls.Add(Theme.Holder(_btnModeAuto, startDock, 220, new Padding(6, 2, 6, 2)));
-            modeBar.Controls.Add(Theme.Holder(btnStopAll, endDock, 195, new Padding(6, 2, 6, 2)));
+            modeBar.Controls.Add(Theme.Holder(_btnModeManual, startDock, 145, new Padding(4, 2, 4, 2)));
+            modeBar.Controls.Add(Theme.Holder(_btnModeAuto, startDock, 135, new Padding(4, 2, 4, 2)));
+            modeBar.Controls.Add(Theme.Holder(_btnToggleSlots, startDock, 135, new Padding(4, 2, 4, 2)));
+            modeBar.Controls.Add(Theme.Holder(_btnToggleMatrix, startDock, 145, new Padding(4, 2, 4, 2)));
+            modeBar.Controls.Add(Theme.Holder(btnStopAll, endDock, 135, new Padding(4, 2, 4, 2)));
 
-            _controlsContainer = new Panel { Dock = DockStyle.Top, Height = 415, Enabled = false };
+            // Zero-scroll main split: LEFT = Direct Manual Controls | RIGHT = Modern Geometric Live Status Monitor (Always Enabled)
+            var mainWorkspace = new Panel { Dock = DockStyle.Top, Height = 380 };
             var split = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
                 RowCount = 1,
-                Padding = new Padding(0, 4, 0, 4)
+                Padding = new Padding(0, 2, 0, 2)
             };
-            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58f));
-            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42f));
+            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
 
-            var holdCard = new Card { Dock = DockStyle.Fill, Padding = new Padding(16), Margin = new Padding(6) };
+            _manualControlsHost = new Panel { Dock = DockStyle.Fill, Enabled = false };
+            var holdCard = new Card { Dock = DockStyle.Fill, Padding = new Padding(14), Margin = new Padding(6) };
             var holdTitle = Theme.Label(
                 Loc.T("Direct Manual Controls (Rows 1–3 Toggle | Row 4 Lanes L1–L4 Momentary + Accept_action_manual M0.4):",
                       "التحكم اليدوي المباشر (الصفوف 1–3 تبديل Toggle | الصف السفلي L1–L4 لحظي Momentary + M0.4):"),
@@ -648,21 +1162,30 @@ namespace AutoPark
 
             holdCard.Controls.Add(holdGrid);
             holdCard.Controls.Add(holdTitle);
+            _manualControlsHost.Controls.Add(holdCard);
 
-            var slotsCard = new Card { Dock = DockStyle.Fill, Padding = new Padding(16), Margin = new Padding(6) };
+            _liveMonitor = new LiveStatusMonitorCard(shell, ConfirmSoftPlcRecovery);
+
+            split.Controls.Add(_manualControlsHost, 0, 0);
+            split.Controls.Add(_liveMonitor, 1, 0);
+            mainWorkspace.Controls.Add(split);
+
+            // Section 1 Collapsible Drawer: Protected Slot Occupancy Reset (hidden by default; toggled via 👁 Slot Reset)
+            _slotsDrawer = new Panel { Dock = DockStyle.Top, Height = 260, Visible = false, Padding = new Padding(0, 4, 0, 4) };
+            var slotsCard = new Card { Dock = DockStyle.Fill, Padding = new Padding(14), Margin = new Padding(6) };
             var slotsTitle = Theme.Label(
                 Loc.T("Protected Slot Occupancy Reset (Double Confirmation + Audit Log):",
                       "إعادة ضبط إشغال المصفات (Reset Slots — محمي بتأكيد مزدوج وسجل تدقيق):"),
                 Theme.Bold(10.2f), Theme.Err);
             slotsTitle.Dock = DockStyle.Top;
-            slotsTitle.Height = 30;
+            slotsTitle.Height = 28;
 
             var slotsGrid = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 4,
                 RowCount = 3,
-                Padding = new Padding(0, 8, 0, 8)
+                Padding = new Padding(0, 6, 0, 6)
             };
             for (int c = 0; c < 4; c++) slotsGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
             for (int r = 0; r < 3; r++) slotsGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 33.33f));
@@ -695,37 +1218,27 @@ namespace AutoPark
                 BaseColor = Theme.Amber,
                 HoverColor = Color.FromArgb(180, 83, 9),
                 Dock = DockStyle.Bottom,
-                Height = 42
+                Height = 38
             };
             btnNewMaint.Click += delegate { ConfirmToggleSpecial("maintenance_reset_tag", Loc.T("Reset Periodic Maintenance Counter", "تصفير عداد الصيانة الدورية")); };
 
             slotsCard.Controls.Add(slotsGrid);
             slotsCard.Controls.Add(slotsTitle);
             slotsCard.Controls.Add(btnNewMaint);
+            _slotsDrawer.Controls.Add(slotsCard);
 
-            split.Controls.Add(holdCard, 0, 0);
-            split.Controls.Add(slotsCard, 1, 0);
-            _controlsContainer.Controls.Add(split);
-
-            // Merged Live Sensors Panel directly below Manual Controls (always live & enabled even in Auto Mode)
-            var sensorDivider = new Panel { Dock = DockStyle.Top, Height = 36, Padding = new Padding(6, 10, 6, 4) };
-            var lblSensorsHeader = Theme.Label(
-                Loc.T("📡 Live PLC Sensors, Physical Inputs (I0.0–I3.7) & Limit Switches (Real-Time Monitor):",
-                      "📡 الحساسات الحية للـ PLC والمداخل الفيزيائية (I0.0–I3.7) وحساسات حدود الطوابق (مراقبة مباشرة):"),
-                Theme.Bold(11f), Theme.Primary);
-            lblSensorsHeader.Dock = DockStyle.Fill;
-            sensorDivider.Controls.Add(lblSensorsHeader);
-
+            // Section 2 Collapsible Drawer: Full Floor Limit Switches Matrix & I0.0-I3.7 Inputs (hidden by default; toggled via 👁 Limit Matrix)
+            _matrixDrawer = new Panel { Dock = DockStyle.Top, Height = 920, Visible = false, Padding = new Padding(0, 4, 0, 4) };
             var embeddedSensors = new SensorMonitorPage(shell)
             {
-                Dock = DockStyle.Top,
-                Height = 900,
+                Dock = DockStyle.Fill,
                 AutoScroll = false
             };
+            _matrixDrawer.Controls.Add(embeddedSensors);
 
-            Controls.Add(embeddedSensors);
-            Controls.Add(sensorDivider);
-            Controls.Add(_controlsContainer);
+            Controls.Add(_matrixDrawer);
+            Controls.Add(_slotsDrawer);
+            Controls.Add(mainWorkspace);
             Controls.Add(modeBar);
             Controls.Add(warnBar);
 
@@ -887,14 +1400,14 @@ namespace AutoPark
                 info.Button.BaseColor = Theme.Ok;
                 info.Button.HoverColor = Color.FromArgb(21, 128, 61);
                 info.Button.BorderColor = Color.FromArgb(187, 247, 208);
-                info.Button.Text = "● " + info.BaseText + " [ON]";
+                info.Button.Text = "● " + info.BaseText;
             }
             else
             {
                 info.Button.BaseColor = info.OffColor;
                 info.Button.HoverColor = ControlPaint.Dark(info.OffColor, 0.08f);
                 info.Button.BorderColor = Color.Empty;
-                info.Button.Text = info.BaseText;
+                info.Button.Text = "○ " + info.BaseText;
             }
             info.Button.Invalidate();
         }
@@ -987,9 +1500,10 @@ namespace AutoPark
                 ReleaseAllOutputs(Loc.T("Returning to Auto Mode — all manual outputs turned OFF", "العودة للوضع التلقائي — تم فصل جميع المخارج اليدوية"));
 
             _manualEnabled = enableManual;
-            _controlsContainer.Enabled = enableManual;
+            _manualControlsHost.Enabled = enableManual;
             ParkState.Instance.Sensors.ManualMode = enableManual;
             ParkState.Instance.Sensors.AutoMode = !enableManual;
+            if (_liveMonitor != null) _liveMonitor.RenderNow();
             _lblStatus.Text = enableManual
                 ? Loc.T("🟠 Manual Mode Active — Click any button to toggle ON/OFF.", "🟠 الوضع اليدوي مفعّل (Manual Mode Active) — اضغط على أي زر للتشغيل أو الإيقاف.")
                 : Loc.T("🟢 Auto Mode Active — Manual controls locked.", "🟢 الوضع التلقائي مفعّل (Auto Mode Active) — تم قفل أزرار التحكم اليدوي.");
@@ -1051,6 +1565,45 @@ namespace AutoPark
             ThreadPool.QueueUserWorkItem(delegate { ParkState.Instance.SendManualControl(controlKey, true); });
             _lblStatus.Text = Loc.T("✅ Executed: ", "✅ تم تنفيذ: ") + titleText;
             _lblStatus.ForeColor = Theme.Ok;
+        }
+
+        void ConfirmSoftPlcRecovery()
+        {
+            var res = Loc.ShowMsg(
+                "Safe PLC Soft Recovery (No Main Power Cut):\n\nThis will:\n1. Release all manual outputs & clear stuck step flags (M0.3, M0.4, M10.0, M10.1)\n2. Pulse ParkDB.Reset (DB2,X10.0) without force-clearing active hardware faults\n3. Re-sync Auto Mode and refresh live S7-1200 telemetry\n\nProceed with safe software recovery?",
+                "إنعاش وإعادة ضبط برمجية آمنة للـ PLC (بدون فصل الكهرباء الرئيسية):\n\nسيقوم النظام بما يلي:\n1. فصل جميع المخارج اليدوية وتصفير إشارات الخطوات العالقة (M0.3, M0.4, M10.0, M10.1)\n2. إرسال نبضة ParkDB.Reset الآمنة (DB2,X10.0)\n3. إعادة تفعيل الوضع التلقائي وتحديث الاتصال بالـ PLC\n\nهل تؤكد المتابعة؟",
+                "PLC Soft Recovery", "إنعاش الـ PLC برمجياً",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            if (res != DialogResult.Yes) return;
+
+            ReleaseAllOutputs(Loc.T("PLC Soft Recovery — releasing all outputs", "إنعاش الـ PLC — فصل جميع المخارج"));
+            ParkState.Instance.RecordLocalAudit("PLC_SOFT_RECOVERY", "PLC",
+                Loc.T("Executed safe software PLC recovery sequence", "تنفيذ إنعاش برمجي آمن للـ PLC بدون فصل الكهرباء"),
+                Loc.UserDisplay(_shell.CurrentUser));
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                ParkState.Instance.SendPlcWriteBool("M10.0", false, 0);
+                ParkState.Instance.SendPlcWriteBool("M10.1", false, 0);
+                ParkState.Instance.SendRecoveryAction("SAFE_RESET");
+                ParkState.Instance.SendManualControl("auto_mode_tag", true);
+                ParkState.Instance.PullSensorsFromBackend();
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    try
+                    {
+                        BeginInvoke((Action)delegate
+                        {
+                            _manualEnabled = false;
+                            _manualControlsHost.Enabled = false;
+                            _lblStatus.Text = Loc.T("✅ PLC Soft Recovery completed safely (Auto Mode synced).", "✅ تم إنعاش الـ PLC برمجياً بنجاح وإعادة مزامنة الوضع التلقائي.");
+                            _lblStatus.ForeColor = Theme.Ok;
+                            if (_liveMonitor != null) _liveMonitor.RenderNow();
+                        });
+                    }
+                    catch { }
+                }
+            });
         }
     }
 
