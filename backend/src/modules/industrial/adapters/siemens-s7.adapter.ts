@@ -820,6 +820,7 @@ export class SiemensS7Adapter implements IndustrialController {
       'man_s1_tag', 'man_s2_tag', 'man_s3_tag', 'man_s4_tag',
       'man_l1_tag', 'man_l2_tag', 'man_l3_tag', 'man_l4_tag',
       'allow_wall_tag', 'accept_manual_tag', 'maintenance_reset_tag', 'siren_silencer_tag', 'obstacle_reset_tag',
+      'cancel_inside_sensor_tag', 'cancel_outside_sensor_tag',
       'stop_all_manual',
       'spot_L11_tag', 'spot_L12_tag', 'spot_L13_tag',
       'spot_L21_tag', 'spot_L22_tag', 'spot_L23_tag',

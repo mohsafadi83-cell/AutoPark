@@ -594,6 +594,7 @@ namespace AutoPark
             var lblTitle = Theme.Label(
                 Loc.T("📡 Live Status Monitor (Auto & Manual)", "📡 شاشة مراقبة الحالة الحية (تلقائي ويدوي)"),
                 Theme.Bold(9.8f), Theme.Primary);
+            lblTitle.UseMnemonic = false;
             lblTitle.Dock = DockStyle.Fill;
             _lblModePill = new Label
             {
@@ -612,16 +613,17 @@ namespace AutoPark
             var photoBar = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 40,
+                Height = 46,
                 ColumnCount = 4,
                 RowCount = 1,
-                Padding = new Padding(0, 4, 0, 4),
+                Padding = new Padding(0, 2, 0, 4),
                 RightToLeft = RightToLeft.No
             };
             photoBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52f));
             photoBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             photoBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62f));
             photoBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52f));
+            photoBar.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             _lampI01 = new LampIndicator(14);
             _tips.SetToolTip(_lampI01, "I0.1 — Photocell Inside");
@@ -633,12 +635,14 @@ namespace AutoPark
             _lblPhotoBanner = new Label
             {
                 Text = Loc.T("Photocell: Entrance Clear", "حساس المدخل: المسار فارغ وآمن"),
-                Font = Theme.Bold(8.8f),
+                Font = Theme.Bold(9.0f),
                 ForeColor = Theme.Ok,
                 BackColor = Theme.OkSoft,
+                AutoSize = false,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Dock = DockStyle.Fill,
-                Margin = new Padding(4, 2, 4, 2)
+                Margin = new Padding(4, 3, 4, 3),
+                UseMnemonic = false
             };
 
             photoBar.Controls.Add(WrapLabeledLamp(_lampI01, "I0.1"), 0, 0);
@@ -740,22 +744,24 @@ namespace AutoPark
 
             _btnCancelIn = new ModernButton
             {
-                Text = Loc.T("Bypass In", "تجاوز داخلي"),
+                Text = Loc.T("○ Cancel Inside Sensor", "○ إلغاء الحساس الداخلي"),
                 BaseColor = Color.FromArgb(71, 85, 105),
                 HoverColor = Color.FromArgb(51, 65, 85),
                 Dock = DockStyle.Fill,
                 Margin = new Padding(2, 0, 2, 0)
             };
+            _tips.SetToolTip(_btnCancelIn, "PLC %M6.1 — cancel_inside_sensor_tag");
             _btnCancelIn.Click += delegate { TogglePhotocellBypass(true); };
 
             _btnCancelOut = new ModernButton
             {
-                Text = Loc.T("Bypass Out", "تجاوز خارجي"),
+                Text = Loc.T("○ Cancel Outside Sensor", "○ إلغاء الحساس الخارجي"),
                 BaseColor = Color.FromArgb(71, 85, 105),
                 HoverColor = Color.FromArgb(51, 65, 85),
                 Dock = DockStyle.Fill,
                 Margin = new Padding(2, 0, 2, 0)
             };
+            _tips.SetToolTip(_btnCancelOut, "PLC %M6.2 — cancel_outside_sensor_tag");
             _btnCancelOut.Click += delegate { TogglePhotocellBypass(false); };
 
             var btnReset = new ModernButton
@@ -861,12 +867,13 @@ namespace AutoPark
         {
             bool next = inside ? !_cancelInOn : !_cancelOutOn;
             string key = inside ? "cancel_inside_sensor_tag" : "cancel_outside_sensor_tag";
+            string plcAddr = inside ? "M6.1" : "M6.2";
             if (next)
             {
                 var ok = Loc.ShowMsg(
-                    "Bypassing a photocell sensor is for supervised maintenance only. Confirm bypass?",
-                    "تجاوز حساس الفوتوسيل مخصص للصيانة تحت إشراف فقط. هل تؤكد التجاوز؟",
-                    "Photocell Bypass", "تجاوز الحساس",
+                    "Confirm linking & activating " + (inside ? "Cancel Inside Sensor (%M6.1)" : "Cancel Outside Sensor (%M6.2)") + " on the PLC?\nUse only under supervised operation.",
+                    "تأكيد تفعيل " + (inside ? "إلغاء الحساس الداخلي (%M6.1)" : "إلغاء الحساس الخارجي (%M6.2)") + " على لوحة الـ PLC؟\nيُستخدم تحت إشراف فقط.",
+                    "PLC Sensor Override", "تجاوز حساس الـ PLC",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
                 if (ok != DialogResult.Yes) return;
             }
@@ -874,13 +881,27 @@ namespace AutoPark
             {
                 _cancelInOn = next;
                 _btnCancelIn.BaseColor = next ? Theme.Amber : Color.FromArgb(71, 85, 105);
+                _btnCancelIn.Text = next
+                    ? Loc.T("● Cancel Inside Sensor", "● إلغاء الحساس الداخلي")
+                    : Loc.T("○ Cancel Inside Sensor", "○ إلغاء الحساس الداخلي");
+                _btnCancelIn.Invalidate();
             }
             else
             {
                 _cancelOutOn = next;
                 _btnCancelOut.BaseColor = next ? Theme.Amber : Color.FromArgb(71, 85, 105);
+                _btnCancelOut.Text = next
+                    ? Loc.T("● Cancel Outside Sensor", "● إلغاء الحساس الخارجي")
+                    : Loc.T("○ Cancel Outside Sensor", "○ إلغاء الحساس الخارجي");
+                _btnCancelOut.Invalidate();
             }
-            ThreadPool.QueueUserWorkItem(delegate { ParkState.Instance.SendManualControl(key, next); });
+            ParkState.Instance.RecordLocalAudit("SENSOR_BYPASS", plcAddr, key + "=" + (next ? "1" : "0"), Loc.UserDisplay(_shell.CurrentUser));
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                // Write directly to PLC %M6.1 / %M6.2 AND sync logical key
+                ParkState.Instance.SendPlcWriteBool(plcAddr, next, 0);
+                ParkState.Instance.SendManualControl(key, next);
+            });
         }
 
         void PollAndUpdate()

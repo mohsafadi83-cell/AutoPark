@@ -40,6 +40,8 @@ class _ManualPlcControlScreenState
     'man_s2_tag': false,
     'man_s3_tag': false,
     'man_s4_tag': false,
+    'cancel_inside_sensor_tag': false,
+    'cancel_outside_sensor_tag': false,
   };
 
   String _statusLine = '';
@@ -519,6 +521,64 @@ class _ManualPlcControlScreenState
       if (!mounted) return;
       _showToast(
         isAr ? 'تعذر تصفير العداد: $e' : 'Failed to reset counter: $e',
+        isError: true,
+      );
+    }
+  }
+
+  Future<void> _togglePhotocellCancel(bool inside, bool isAr) async {
+    final key = inside ? 'cancel_inside_sensor_tag' : 'cancel_outside_sensor_tag';
+    final plcAddr = inside ? 'M6.1' : 'M6.2';
+    final next = !(_toggleStates[key] ?? false);
+    if (next) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(
+            isAr
+                ? (inside ? 'إلغاء الحساس الداخلي (%M6.1)' : 'إلغاء الحساس الخارجي (%M6.2)')
+                : (inside ? 'Cancel Inside Sensor (%M6.1)' : 'Cancel Outside Sensor (%M6.2)'),
+          ),
+          content: Text(
+            isAr
+                ? 'تأكيد تفعيل تجاوز الحساس على لوحة الـ PLC؟ يُستخدم تحت إشراف فقط.'
+                : 'Confirm activating this sensor override on the PLC panel? Use only under supervision.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(isAr ? 'إلغاء' : 'Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.statusWarning,
+                foregroundColor: Colors.black,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: Text(isAr ? 'تأكيد' : 'Confirm'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    setState(() => _toggleStates[key] = next);
+    HapticFeedback.mediumImpact();
+    final notifier = ref.read(appControllerProvider.notifier);
+    try {
+      await notifier.writeLivePlcTag(plcAddr, next);
+      await notifier.sendManualControl(key, next).catchError((_) => const <String, dynamic>{});
+      if (!mounted) return;
+      _showToast(
+        isAr
+            ? '✅ تم تحديث $plcAddr (${next ? "ON" : "OFF"}) على الـ PLC'
+            : '✅ PLC $plcAddr updated (${next ? "ON" : "OFF"})',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _toggleStates[key] = !next);
+      _showToast(
+        isAr ? 'تعذر تحديث $plcAddr على الـ PLC' : 'Failed to write $plcAddr on PLC',
         isError: true,
       );
     }
@@ -1210,12 +1270,68 @@ class _ManualPlcControlScreenState
                     ),
                   ),
             ],
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Alarm Word: ${s['alarmWord'] ?? 0}',
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor:
+                              (_toggleStates['cancel_inside_sensor_tag'] == true)
+                                  ? Colors.black
+                                  : Colors.white,
+                          backgroundColor:
+                              (_toggleStates['cancel_inside_sensor_tag'] == true)
+                                  ? AppColors.statusWarning
+                                  : AppColors.surfaceDark,
+                          side: BorderSide(
+                            color: (_toggleStates['cancel_inside_sensor_tag'] == true)
+                                ? AppColors.statusWarning
+                                : Colors.white24,
+                          ),
+                        ),
+                        onPressed: () => _togglePhotocellCancel(true, isAr),
+                        child: Text(
+                          (_toggleStates['cancel_inside_sensor_tag'] == true ? '● ' : '○ ') +
+                              (isAr ? 'إلغاء الحساس الداخلي' : 'Cancel Inside Sensor'),
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor:
+                              (_toggleStates['cancel_outside_sensor_tag'] == true)
+                                  ? Colors.black
+                                  : Colors.white,
+                          backgroundColor:
+                              (_toggleStates['cancel_outside_sensor_tag'] == true)
+                                  ? AppColors.statusWarning
+                                  : AppColors.surfaceDark,
+                          side: BorderSide(
+                            color: (_toggleStates['cancel_outside_sensor_tag'] == true)
+                                ? AppColors.statusWarning
+                                : Colors.white24,
+                          ),
+                        ),
+                        onPressed: () => _togglePhotocellCancel(false, isAr),
+                        child: Text(
+                          (_toggleStates['cancel_outside_sensor_tag'] == true ? '● ' : '○ ') +
+                              (isAr ? 'إلغاء الحساس الخارجي' : 'Cancel Outside Sensor'),
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Alarm Word: ${s['alarmWord'] ?? 0}',
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
