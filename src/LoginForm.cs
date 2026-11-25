@@ -1,7 +1,10 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Windows.Forms;
 
 namespace AutoPark
@@ -14,6 +17,7 @@ namespace AutoPark
         readonly AppSettings _settings;
         readonly TextBox _user;
         readonly TextBox _pass;
+        readonly CheckBox _chkRemember;
         readonly Label _error;
         int _failedAttempts = 0;
         DateTime _lockoutUntilUtc = DateTime.MinValue;
@@ -107,21 +111,31 @@ namespace AutoPark
             passBox.SetBounds(x, 240, w, 42);
 
             _error = Theme.Label("", Theme.F(9.3f), Theme.Err);
-            _error.SetBounds(x, 290, w, 28);
+            _error.SetBounds(x, 286, w, 24);
+
+            _chkRemember = new CheckBox();
+            _chkRemember.Text = Loc.T("Remember username & password on this PC (Encrypted)", "تذكر اسم المستخدم وكلمة المرور على هذا الجهاز (مشفّر)");
+            _chkRemember.Font = Theme.F(9f);
+            _chkRemember.ForeColor = Theme.Ink;
+            _chkRemember.AutoSize = true;
+            _chkRemember.Checked = true;
+            _chkRemember.SetBounds(x, 312, w, 24);
 
             var login = new ModernButton();
             login.Text = Loc.T("Sign In", "تسجيل الدخول");
             login.Font = Theme.Bold(12f);
-            login.SetBounds(x, 326, w, 46);
+            login.SetBounds(x, 344, w, 46);
             login.Click += OnLogin;
             AcceptButton = login;
 
-            side.Controls.AddRange(new Control[] { btnLang, title, sub, lu, userBox, lp, passBox, _error, login });
+            side.Controls.AddRange(new Control[] { btnLang, title, sub, lu, userBox, lp, passBox, _error, _chkRemember, login });
 
             Controls.Add(side);
             Controls.Add(brand);
 
-            Shown += delegate { _user.Focus(); };
+            LoadSavedCredentials();
+
+            Shown += delegate { if (_user.Text.Length > 0 && _pass.Text.Length > 0) login.Focus(); else _user.Focus(); };
             KeyDown += delegate (object s, KeyEventArgs e)
             {
                 if (e.KeyCode == Keys.Escape) { DialogResult = DialogResult.Cancel; Close(); }
@@ -190,6 +204,8 @@ namespace AutoPark
             if (user.Length > 0 && pwd.Length > 0 && _settings.Users.TryGetValue(user, out acc) && PasswordSecurity.VerifyPassword(pwd, acc.Password))
             {
                 _failedAttempts = 0;
+                if (_chkRemember.Checked) SaveEncryptedCredentials(user, pwd);
+                else ClearSavedCredentials();
                 ParkState.Instance.EnsureBackendRunningAndLogin(user, pwd);
                 _pass.Text = "";
                 AuthenticatedUser = acc;
@@ -211,6 +227,89 @@ namespace AutoPark
             }
             _pass.Text = "";
             _pass.Focus();
+        }
+
+        static string CredFilePath
+        {
+            get
+            {
+                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AutoPark");
+                Directory.CreateDirectory(dir);
+                return Path.Combine(dir, "cred.dat");
+            }
+        }
+
+        static byte[] DeriveMachineUserKey()
+        {
+            string seed = "AutoPark-Cred-V1|" + Environment.MachineName + "|" + Environment.UserName;
+            using (var sha = SHA256.Create())
+                return sha.ComputeHash(Encoding.UTF8.GetBytes(seed));
+        }
+
+        void SaveEncryptedCredentials(string user, string pwd)
+        {
+            try
+            {
+                byte[] plain = Encoding.UTF8.GetBytes(user + "\n" + pwd);
+                using (var aes = new AesManaged())
+                {
+                    aes.Key = DeriveMachineUserKey();
+                    aes.GenerateIV();
+                    using (var ms = new MemoryStream())
+                    {
+                        ms.Write(aes.IV, 0, aes.IV.Length);
+                        using (var cs = new CryptoStream(ms, aes.CreateEncryptor(), CryptoStreamMode.Write))
+                        {
+                            cs.Write(plain, 0, plain.Length);
+                            cs.FlushFinalBlock();
+                        }
+                        File.WriteAllBytes(CredFilePath, ms.ToArray());
+                    }
+                }
+            }
+            catch { }
+        }
+
+        void LoadSavedCredentials()
+        {
+            try
+            {
+                string path = CredFilePath;
+                if (!File.Exists(path)) return;
+                byte[] blob = File.ReadAllBytes(path);
+                if (blob.Length < 17) return;
+                byte[] iv = new byte[16];
+                Buffer.BlockCopy(blob, 0, iv, 0, 16);
+                using (var aes = new AesManaged())
+                {
+                    aes.Key = DeriveMachineUserKey();
+                    aes.IV = iv;
+                    using (var ms = new MemoryStream(blob, 16, blob.Length - 16))
+                    using (var cs = new CryptoStream(ms, aes.CreateDecryptor(), CryptoStreamMode.Read))
+                    using (var sr = new StreamReader(cs, Encoding.UTF8))
+                    {
+                        string content = sr.ReadToEnd();
+                        int nl = content.IndexOf('\n');
+                        if (nl > 0)
+                        {
+                            _user.Text = content.Substring(0, nl);
+                            _pass.Text = content.Substring(nl + 1);
+                            _chkRemember.Checked = true;
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        static void ClearSavedCredentials()
+        {
+            try
+            {
+                string path = CredFilePath;
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch { }
         }
     }
 }

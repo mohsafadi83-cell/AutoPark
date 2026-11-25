@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../core/network/api_error.dart';
 import '../../core/providers/app_providers.dart';
@@ -16,6 +17,10 @@ class LoginScreen extends ConsumerStatefulWidget {
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
+  static const _secureStorage = FlutterSecureStorage();
+  static const _kSavedUser = 'autopark_saved_username';
+  static const _kSavedPass = 'autopark_saved_password';
+
   final _formKey = GlobalKey<FormState>();
   final _usernameCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
@@ -31,6 +36,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.initState();
     final st = ref.read(appControllerProvider);
     _rememberMe = st.rememberMe;
+    _loadSavedCredentials();
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    try {
+      final savedUser = await _secureStorage.read(key: _kSavedUser);
+      final savedPass = await _secureStorage.read(key: _kSavedPass);
+      if (!mounted) return;
+      if (savedUser != null && savedUser.isNotEmpty) {
+        setState(() {
+          _usernameCtrl.text = savedUser;
+          if (savedPass != null && savedPass.isNotEmpty) {
+            _passwordCtrl.text = savedPass;
+          }
+          _rememberMe = true;
+        });
+      }
+    } catch (_) {
+      // Ignore secure storage read failures in headless test environments
+    }
   }
 
   @override
@@ -58,13 +83,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
     final l10n = AppLocalizations.of(context);
     try {
+      final userTrimmed = _usernameCtrl.text.trim();
+      final pwdRaw = _passwordCtrl.text;
       await ref.read(appControllerProvider.notifier).login(
-            username: _usernameCtrl.text.trim(),
-            password: _passwordCtrl.text,
+            username: userTrimmed,
+            password: pwdRaw,
             rememberMe: _rememberMe,
           );
       _failedAttempts = 0;
       _lockoutUntilUtc = null;
+      try {
+        if (_rememberMe) {
+          await _secureStorage.write(key: _kSavedUser, value: userTrimmed);
+          await _secureStorage.write(key: _kSavedPass, value: pwdRaw);
+        } else {
+          await _secureStorage.delete(key: _kSavedUser);
+          await _secureStorage.delete(key: _kSavedPass);
+        }
+      } catch (_) {}
       _passwordCtrl.clear();
     } on ApiError catch (e) {
       if (!mounted) return;
