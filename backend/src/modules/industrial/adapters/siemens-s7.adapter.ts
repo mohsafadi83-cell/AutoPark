@@ -114,6 +114,17 @@ export class SiemensS7Adapter implements IndustrialController {
   private conn: any = null;
   private translationMap: Record<string, string> = {};
   private writeChain: Promise<void> = Promise.resolve();
+  private commandChain: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Strict FIFO sequential command queue so the S7-1200 PLC only ever executes
+   * ONE high-level command at a time (prevents concurrent write collisions / PLC hangs).
+   */
+  private enqueueCommand<T>(task: () => Promise<T>): Promise<T> {
+    const next = this.commandChain.then(task, task);
+    this.commandChain = next.catch(() => undefined);
+    return next;
+  }
   private pollTimer: NodeJS.Timeout | null = null;
   private polling = false;
   private consecutivePollErrors = 0;
@@ -746,6 +757,7 @@ export class SiemensS7Adapter implements IndustrialController {
    * - SAFE_RESET: pulses `ParkDB.Reset` ONLY — NEVER force-zeros `ParkDB."Alarm Word"` from HMI!
    */
   async emergencyRecovery(action: EmergencyRecoveryAction): Promise<{ ok: boolean; action: EmergencyRecoveryAction; message: string }> {
+    // Latch soft E-Stop synchronously BEFORE queuing so any pending motion command aborts immediately
     if (action === 'ESTOP_ON') {
       this.softEmergencyStop = true;
       const hasMoving = [...this.commands.values()].some((c) => ['RECEIVED', 'ACKNOWLEDGED', 'EXECUTING'].includes(c.feedback.status));
@@ -757,54 +769,75 @@ export class SiemensS7Adapter implements IndustrialController {
           this.updateCmd(rc, { status: 'FAILED', errorMessage: 'Emergency Stop Triggered' });
         }
       }
-      await this.tryWriteLogicalTag('emergency_status_tag', true);
-      this.decodePlcAlarms(this.lastValues);
-      return { ok: true, action, message: 'تم تفعيل إيقاف الطوارئ وإيقاف كافة أوامر الحركة فوراً.' };
     }
 
-    if (action === 'ESTOP_OFF') {
-      this.softEmergencyStop = false;
-      this.softEmergencyDuringMove = false;
-      await this.tryWriteLogicalTag('emergency_status_tag', false);
-      this.decodePlcAlarms(this.lastValues);
-      return { ok: true, action, message: 'تم إلغاء حالة إيقاف الطوارئ البرمجية بعد التأكد من أمان الماكنة.' };
-    }
-
-    if (action === 'COMPLETE_SEQ') {
-      this.softEmergencyStop = false;
-      this.softEmergencyDuringMove = false;
-      await this.tryWriteLogicalTag('auto_mode_tag', true);
-      await this.tryWriteLogicalTag('step1_ready_tag', true, 400);
-      await this.tryWriteLogicalTag('complete_seq_tag', true, 400);
-      this.decodePlcAlarms(this.lastValues);
-      return { ok: true, action, message: 'تم إرسال أمر إكمال المسار (Complete Seq) إلى الـ PLC.' };
-    }
-
-    if (action === 'RETURN_PARK') {
-      const snap = this.getSensorsSnapshot();
-      if (snap.emergencyStop || snap.obstacleExist) {
-        throw new ControllerError(
-          'Cannot return lift to home while Emergency Stop or Obstacle is active',
-          'REJECTED',
-        );
+    return this.enqueueCommand(async () => {
+      if (action === 'ESTOP_ON') {
+        this.activeManualActionKeys.clear();
+        // Immediately halt ALL PLC motion, step triggers, and modes sequentially
+        const haltTags = [
+          'accept_manual_tag', 'manual_action_tag',
+          'step1_start_tag', 'step2_start_tag',
+          'auto_mode_tag', 'manual_mode_tag',
+          'man_pump_tag', 'man_up_tag', 'man_down_tag',
+          'man_wall_tag', 'man_cutoff_tag',
+          'man_l1_tag', 'man_l2_tag', 'man_l3_tag', 'man_l4_tag',
+          'man_s1_tag', 'man_s2_tag', 'man_s3_tag', 'man_s4_tag',
+        ];
+        for (const k of haltTags) {
+          await this.tryWriteLogicalTag(k, false);
+        }
+        await this.tryWriteLogicalTag('emergency_status_tag', true);
+        await this.tryWriteLogicalTag('emg_db_tag', true);
+        this.decodePlcAlarms(this.lastValues);
+        return { ok: true, action, message: 'تم تفعيل إيقاف الطوارئ وإيقاف كافة أوامر الحركة والمخارج على الـ PLC فوراً.' };
       }
-      await this.tryWriteLogicalTag('auto_mode_tag', true);
-      await this.tryWriteLogicalTag('step2_start_tag', true);
-      await this.tryWriteLogicalTag('step2_ready_tag', false);
-      this.decodePlcAlarms(this.lastValues);
-      return { ok: true, action, message: 'تم إرسال أمر إرجاع المصعد إلى الوضع الطبيعي (Return Lift to Home).' };
-    }
 
-    // SAFE_RESET: pulse ParkDB.Reset + clear Reset merker %M0.5 (matches HMI Button_25 Press; never force-writes Alarm Word!)
-    await this.tryWriteLogicalTag('reset_m_tag', false);
-    await this.tryWriteLogicalTag('reset_command_tag', true, 400);
-    await this.tryWriteLogicalTag('obstacle_reset_tag', true, 400);
-    this.decodePlcAlarms(this.lastValues);
-    return {
-      ok: true,
-      action,
-      message: 'تم إرسال نبضة إعادة ضبط آمنة (ParkDB.Reset) — لا يتم تصفير سجل الأعطال قسرياً إلا بزوال السبب الفيزيائي.',
-    };
+      if (action === 'ESTOP_OFF') {
+        this.softEmergencyStop = false;
+        this.softEmergencyDuringMove = false;
+        await this.tryWriteLogicalTag('emergency_status_tag', false);
+        await this.tryWriteLogicalTag('emg_db_tag', false);
+        this.decodePlcAlarms(this.lastValues);
+        return { ok: true, action, message: 'تم إلغاء حالة إيقاف الطوارئ البرمجية بعد التأكد من أمان الماكنة.' };
+      }
+
+      if (action === 'COMPLETE_SEQ') {
+        this.softEmergencyStop = false;
+        this.softEmergencyDuringMove = false;
+        await this.tryWriteLogicalTag('auto_mode_tag', true);
+        await this.tryWriteLogicalTag('step1_ready_tag', true, 400);
+        await this.tryWriteLogicalTag('complete_seq_tag', true, 400);
+        this.decodePlcAlarms(this.lastValues);
+        return { ok: true, action, message: 'تم إرسال أمر إكمال المسار (Complete Seq) إلى الـ PLC.' };
+      }
+
+      if (action === 'RETURN_PARK') {
+        const snap = this.getSensorsSnapshot();
+        if (snap.emergencyStop || snap.obstacleExist) {
+          throw new ControllerError(
+            'Cannot return lift to home while Emergency Stop or Obstacle is active',
+            'REJECTED',
+          );
+        }
+        await this.tryWriteLogicalTag('auto_mode_tag', true);
+        await this.tryWriteLogicalTag('step2_start_tag', true);
+        await this.tryWriteLogicalTag('step2_ready_tag', false);
+        this.decodePlcAlarms(this.lastValues);
+        return { ok: true, action, message: 'تم إرسال أمر إرجاع المصعد إلى الوضع الطبيعي (Return Lift to Home).' };
+      }
+
+      // SAFE_RESET: pulse ParkDB.Reset + clear Reset merker %M0.5 (matches HMI Button_25 Press; never force-writes Alarm Word!)
+      await this.tryWriteLogicalTag('reset_m_tag', false);
+      await this.tryWriteLogicalTag('reset_command_tag', true, 400);
+      await this.tryWriteLogicalTag('obstacle_reset_tag', true, 400);
+      this.decodePlcAlarms(this.lastValues);
+      return {
+        ok: true,
+        action,
+        message: 'تم إرسال نبضة إعادة ضبط آمنة (ParkDB.Reset) — لا يتم تصفير سجل الأعطال قسرياً إلا بزوال السبب الفيزيائي.',
+      };
+    });
   }
 
   /**
@@ -814,6 +847,10 @@ export class SiemensS7Adapter implements IndustrialController {
    * - Releasing ANY valve or lane (`man_l1_tag`..`man_l4_tag`) ALWAYS explicitly writes `false` (fixes L2 InvertBit bug!)
    */
   async manualControl(controlKey: string, active: boolean): Promise<{ ok: boolean; controlKey: string; active: boolean; message: string }> {
+    return this.enqueueCommand(() => this.executeManualControlSerialized(controlKey, active));
+  }
+
+  private async executeManualControlSerialized(controlKey: string, active: boolean): Promise<{ ok: boolean; controlKey: string; active: boolean; message: string }> {
     const allowedKeys = new Set([
       'manual_mode_tag', 'auto_mode_tag', 'man_pump_tag', 'man_wall_tag', 'man_cutoff_tag',
       'man_up_tag', 'man_down_tag',
@@ -973,11 +1010,11 @@ export class SiemensS7Adapter implements IndustrialController {
   }
 
   async sendParkCommand(cmd: ControllerCommand): Promise<void> {
-    await this.dispatchPlcCommand(cmd);
+    await this.enqueueCommand(() => this.dispatchPlcCommand(cmd));
   }
 
   async sendRetrieveCommand(cmd: ControllerCommand): Promise<void> {
-    await this.dispatchPlcCommand(cmd);
+    await this.enqueueCommand(() => this.dispatchPlcCommand(cmd));
   }
 
   private async dispatchPlcCommand(cmd: ControllerCommand): Promise<void> {
