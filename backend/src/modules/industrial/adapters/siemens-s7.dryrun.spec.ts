@@ -162,10 +162,10 @@ describe('SiemensS7Adapter — Safe Dry-Run Simulation (ZERO Physical Movement)'
     expect(seq).not.toContain('step1_start_tag:M10.0=false');
     expect(seq).toContain('step1_ready_tag:DB2,X5.4=false');
 
-    // Step 2: Step2_Start latched true -> Step2_Ready=false (PDF p. 104)
-    expect(seq).toContain('step2_start_tag:M10.1=true');
-    expect(seq).not.toContain('step2_start_tag:M10.1=false');
-    expect(seq).toContain('step2_ready_tag:DB2,X5.6=false');
+    // Step 2 MUST NOT auto-trigger on a timer; Auto_DB stays latched ON until explicit RETURN_PARK
+    expect(seq).toContain('cancel_step_tag:M3.1=false');
+    expect(seq).toContain('auto_mode_tag:DB1,X0.3=true');
+    expect(seq).not.toContain('step2_start_tag:M10.1=true');
 
     const fb = await adapter.getCommandStatus('CMD-DRY-PARK-L32');
     expect(fb.status).toBe('COMPLETED');
@@ -184,7 +184,8 @@ describe('SiemensS7Adapter — Safe Dry-Run Simulation (ZERO Physical Movement)'
     expect(seq).toContain('retrieve_command_tag:DB2,X6.4=true');
     expect(seq).not.toContain('retrieve_command_tag:DB2,X6.4=false');
     expect(seq).toContain('step1_start_tag:M10.0=true');
-    expect(seq).toContain('step2_start_tag:M10.1=true');
+    expect(seq).toContain('auto_mode_tag:DB1,X0.3=true');
+    expect(seq).not.toContain('step2_start_tag:M10.1=true');
   });
 
   test('Manual UP / DOWN enforce strict hydraulic interlock (UP clears DOWN+Cutoff; DOWN clears UP+Pump+Cutoff)', async () => {

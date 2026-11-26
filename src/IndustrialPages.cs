@@ -803,8 +803,28 @@ namespace AutoPark
             };
             btnReset.Click += delegate
             {
-                ThreadPool.QueueUserWorkItem(delegate { ParkState.Instance.SendRecoveryAction("SAFE_RESET"); });
-                _lblAutoTrack.Text = Loc.T("✅ Safe PLC Reset pulse (ParkDB.Reset) sent.", "✅ تم إرسال نبضة إعادة الضبط الآمنة.");
+                _lblAutoTrack.Text = Loc.T("⏳ Sending Safe Reset (%M0.5 + ParkDB.Reset)...", "⏳ جاري إرسال نبضة إعادة الضبط الآمنة (%M0.5 + ParkDB.Reset)...");
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    var ps = ParkState.Instance;
+                    string res = ps.SendRecoveryAction("SAFE_RESET");
+                    ps.PullSensorsFromBackend();
+                    if (!IsDisposed && IsHandleCreated)
+                    {
+                        try
+                        {
+                            BeginInvoke((Action)delegate
+                            {
+                                bool ok = string.IsNullOrEmpty(res) || !res.StartsWith("ERR:");
+                                _lblAutoTrack.Text = ok
+                                    ? Loc.T("✅ Safe Reset (%M0.5 + DB2,X10.0) sent to PLC.", "✅ تم إرسال نبضة إعادة الضبط (%M0.5 + DB2,X10.0) بنجاح.")
+                                    : Loc.T("⚠ Safe Reset failed: " + res, "⚠ فشل إرسال إعادة الضبط: " + res);
+                                RenderNow();
+                            });
+                        }
+                        catch { }
+                    }
+                });
             };
 
             var btnSoftRec = new ModernButton

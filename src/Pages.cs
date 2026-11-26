@@ -1079,7 +1079,8 @@ namespace AutoPark
                     _backendDispatched = true;
                 }
 
-                // Clear any leftover manual bits & ensure pure Auto Mode
+                // Clear any leftover manual/cancel bits & ensure pure Auto Mode (OB1 Network 9: M3.1=0 so Auto_DB stays latched!)
+                ps.SendPlcWriteBool("M3.1", false, 0);       // cancel_this_step = 0 (prevents OB1 N9 from resetting Auto_DB!)
                 ps.SendPlcWriteBool("DB1,X1.1", false, 0);   // Man_Pump = 0
                 ps.SendPlcWriteBool("DB1,X1.2", false, 0);   // Man_Wall = 0
                 ps.SendPlcWriteBool("DB1,X1.3", false, 0);   // Man_Up = 0

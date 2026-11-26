@@ -872,15 +872,18 @@ export class SiemensS7Adapter implements IndustrialController {
         return { ok: true, action, message: 'تم إرسال أمر إرجاع المصعد إلى الوضع الطبيعي (Return Lift to Home).' };
       }
 
-      // SAFE_RESET: pulse ParkDB.Reset + clear Reset merker %M0.5 (matches HMI Button_25 Press; never force-writes Alarm Word!)
-      await this.tryWriteLogicalTag('reset_m_tag', false);
-      await this.tryWriteLogicalTag('reset_command_tag', true, 400);
-      await this.tryWriteLogicalTag('obstacle_reset_tag', true, 400);
+      // SAFE_RESET: pulse Reset merker %M0.5 + ParkDB.Reset (DB2,X10.0) + obstacle_reset (%M5.7)
+      this.softEmergencyStop = false;
+      this.softEmergencyDuringMove = false;
+      await this.tryWriteLogicalTag('cancel_step_tag', false);
+      await this.tryWriteLogicalTag('reset_m_tag', true, 450);
+      await this.tryWriteLogicalTag('reset_command_tag', true, 450);
+      await this.tryWriteLogicalTag('obstacle_reset_tag', true, 450);
       this.decodePlcAlarms(this.lastValues);
       return {
         ok: true,
         action,
-        message: 'تم إرسال نبضة إعادة ضبط آمنة (ParkDB.Reset) — لا يتم تصفير سجل الأعطال قسرياً إلا بزوال السبب الفيزيائي.',
+        message: 'تم إرسال نبضة إعادة الضبط الآمنة (%M0.5 + ParkDB.Reset DB2,X10.0) بنجاح.',
       };
     },
     { sig: `RECOVERY:${action}`, priority: action === 'ESTOP_ON' || action === 'ESTOP_OFF' },
@@ -1145,6 +1148,11 @@ export class SiemensS7Adapter implements IndustrialController {
       await this.tryWriteLogicalTag('retrieve_command_tag', true);
     }
 
+    // Ensure clean Auto Mode prerequisites per TIA Portal OB1 Network 9:
+    // Clear cancel_this_step (%M3.1), Manual_DB (DB1,X0.5), User_Logoff (DB1,X2.6) BEFORE latching Auto_DB (DB1,X0.3) = 1
+    await this.tryWriteLogicalTag('cancel_step_tag', false);
+    await this.tryWriteLogicalTag('manual_mode_tag', false);
+    await this.tryWriteLogicalTag('user_logoff_tag', false);
     await this.tryWriteLogicalTag('auto_mode_tag', true);
     await this.tryWriteLogicalTag('step1_ready_tag', true);
 
@@ -1201,18 +1209,9 @@ export class SiemensS7Adapter implements IndustrialController {
       );
     });
 
-    // Step 2: Return Park & Close Wall (PDF p. 104: SetBit Park_IN_Step2_Start %M10.1, ResetBit Park_Step2_Ready DB2,X5.6)
+    // Step 2 (Return Park) MUST NEVER be auto-triggered by a timer!
+    // Auto_DB (DB1,X0.3) stays latched ON until operator explicitly triggers RETURN_PARK (M10.1=1) and platform returns Home.
     const step2Time = ackDelay + (pathFloors.length + 1) * stepDelay;
-    rc.timers.push(
-      setTimeout(() => {
-        void (async () => {
-          await this.tryWriteLogicalTag('step2_start_tag', true);
-          await this.tryWriteLogicalTag('step2_ready_tag', false);
-          this.updateCmd(rc, { status: 'EXECUTING', progress: 90, phase: phases[3] });
-        })();
-      }, step2Time),
-    );
-
     rc.timers.push(
       setTimeout(() => {
         this.updateCmd(rc, {
@@ -1220,7 +1219,7 @@ export class SiemensS7Adapter implements IndustrialController {
           progress: 100,
           phase: cmd.type === 'PARK' ? 'VEHICLE_PARKED' : 'VEHICLE_AT_EXIT',
         });
-      }, step2Time + stepDelay),
+      }, step2Time),
     );
   }
 
