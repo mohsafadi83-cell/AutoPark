@@ -2000,28 +2000,47 @@ namespace AutoPark
 
             _chkEnforce = new CheckBox
             {
-                Text = Loc.T("🔒 Strict Whitelist: Allow ONLY Registered Employee Phones (Blocks all unregistered & revoked devices)",
-                             "🔒 تقييد الدخول والتحكم من الموبايل للهواتف المصرّح بها للموظفين فقط (يمنع أي جهاز غير مسجّل أو ملغى)"),
+                Text = Loc.T("🔒 Enable MAC Service (Allow ONLY Registered Employee Phones)",
+                             "🔒 تفعيل خدمة الـ MAC (السماح للهواتف المسجّلة والمصرّح بها فقط)"),
                 Checked = ParkState.Instance.EnforceDeviceWhitelist,
                 AutoSize = true,
                 Font = Theme.Semi(9.5f),
                 ForeColor = Theme.Primary
             };
-            _chkEnforce.SetBounds(16, 102, 780, 26);
+            _chkEnforce.SetBounds(16, 102, 560, 26);
             _chkEnforce.CheckedChanged += delegate
             {
                 bool val = _chkEnforce.Checked;
-                ParkState.Instance.SetDeviceWhitelistPolicyOnBackend(val);
                 _lblInfo.Text = val
-                    ? Loc.T("🔒 Strict whitelist ON: Only registered employee phones are allowed.", "🔒 تم تفعيل التقييد: لا يسمح إلا للهواتف المسجّلة والمفعّلة.")
-                    : Loc.T("🟡 Whitelist relaxed (Revoked employee devices remain permanently blocked).", "🟡 تم تعطيل التقييد (الهواتف الملغاة تبقى محظورة دائماً).");
+                    ? Loc.T("⏳ MAC Service set to ON — click 'Save' to apply.", "⏳ تم اختيار تفعيل خدمة الـ MAC — اضغط «حفظ» للتطبيق.")
+                    : Loc.T("⏳ MAC Service set to OFF — click 'Save' to disable.", "⏳ تم اختيار إيقاف خدمة الـ MAC — اضغط «حفظ» للإلغاء.");
+            };
+
+            var btnSaveMac = new ModernButton
+            {
+                Text = Loc.T("Save MAC Service", "حفظ خدمة MAC"),
+                IconGlyph = Icons.Check,
+                BaseColor = Color.FromArgb(22, 163, 74),
+                HoverColor = Color.FromArgb(21, 128, 61)
+            };
+            btnSaveMac.SetBounds(775, 98, 170, 36);
+            btnSaveMac.Click += delegate
+            {
+                bool val = _chkEnforce.Checked;
+                ParkState.Instance.SetDeviceWhitelistPolicyOnBackend(val);
+                ParkState.Instance.RecordLocalAudit("MAC_SERVICE_POLICY", "MAC_WHITELIST",
+                    val ? "MAC Service Enabled" : "MAC Service Disabled",
+                    val ? "تم تفعيل خدمة الـ MAC وحفظ الإعداد" : "تم إلغاء/إيقاف خدمة الـ MAC وحفظ الإعداد");
+                _lblInfo.Text = val
+                    ? Loc.T("✅ Saved: MAC Service is ENABLED (only registered phones allowed).", "✅ تم الحفظ: خدمة الـ MAC مفعّلة (فقط الهواتف المسجّلة مسموح لها).")
+                    : Loc.T("✅ Saved: MAC Service is DISABLED (all authorized accounts allowed).", "✅ تم الحفظ: تم إيقاف خدمة الـ MAC (يمكن الدخول من جميع الأجهزة).");
             };
 
             _lblInfo = Theme.Label(
-                Loc.T("When an employee resigns, click '🚫 Revoke Control' to instantly block their phone and terminate all active sessions.",
-                      "عند استقالة أي موظف اضغط «🚫 إلغاء التحكم» لإيقاف هاتفه وإغلاق جلساته فوراً."),
+                Loc.T("Toggle MAC Service ON/OFF above and click 'Save MAC Service' to apply or cancel.",
+                      "فعّل أو أوقف خدمة الـ MAC أعلاه ثم اضغط «حفظ خدمة MAC» للتطبيق أو الإلغاء."),
                 Theme.F(9f), Theme.Muted);
-            _lblInfo.SetBounds(16, 126, 950, 20);
+            _lblInfo.SetBounds(16, 128, 750, 20);
 
             var btnRefresh = new ModernButton
             {
@@ -2035,7 +2054,7 @@ namespace AutoPark
             btnRefresh.SetBounds(956, 98, 155, 36);
             btnRefresh.Click += delegate { RefreshDevices(); };
 
-            topCard.Controls.AddRange(new Control[] { lblTitle, btnAdd, _chkEnforce, _lblInfo, btnRefresh });
+            topCard.Controls.AddRange(new Control[] { lblTitle, btnAdd, _chkEnforce, btnSaveMac, _lblInfo, btnRefresh });
 
             var gridCard = new Card { Dock = DockStyle.Fill, Padding = new Padding(12) };
             _grid = VehiclesPage.CreateStyledGrid();
