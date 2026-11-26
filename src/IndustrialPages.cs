@@ -1728,7 +1728,12 @@ namespace AutoPark
             st.NotifyChanged();
 
             string key = "spot_" + spotCode + "_tag";
-            ThreadPool.QueueUserWorkItem(delegate { st.SendManualControl(key, false); });
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                st.SendManualControl(key, false);
+                System.Threading.Thread.Sleep(350);
+                st.PullSpacesFromDatabase();
+            });
 
             _lblStatus.Text = Loc.T("✅ Bay " + spotCode + " reset and logged in audit trail.", "✅ تم تصفير المصف " + spotCode + " وتسجيل العملية في سجل التدقيق.");
             _lblStatus.ForeColor = Theme.Ok;

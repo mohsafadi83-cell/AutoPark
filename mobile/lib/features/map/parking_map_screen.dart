@@ -719,6 +719,89 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  // Pause & Resume Lift (1:1 Desktop AutoPark.exe Pages.cs behavior)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFEA580C),
+                            side: const BorderSide(
+                              color: Color(0xFFEA580C),
+                              width: 1.4,
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                          ),
+                          onPressed: canRequest
+                              ? () async {
+                                  final n = ref.read(appControllerProvider.notifier);
+                                  try {
+                                    await n.writeLivePlcTag('M10.0', false);
+                                    await n.writeLivePlcTag('DB1,X0.3', false);
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            isAr
+                                                ? '⏸ تم إيقاف المصعد مؤقتاً (Auto_DB = OFF)'
+                                                : '⏸ Lift paused (Auto_DB = OFF)',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  } catch (_) {}
+                                }
+                              : null,
+                          icon: const Icon(Icons.pause_circle_outline_rounded, size: 19),
+                          label: Text(
+                            isAr ? 'إيقاف مؤقت' : 'PAUSE',
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF16A34A),
+                            side: const BorderSide(
+                              color: Color(0xFF16A34A),
+                              width: 1.4,
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                          ),
+                          onPressed: canRequest
+                              ? () async {
+                                  final n = ref.read(appControllerProvider.notifier);
+                                  try {
+                                    await n.writeLivePlcTag('M3.1', false);
+                                    await n.writeLivePlcTag('DB1,X0.3', true);
+                                    await n.writeLivePlcTag('M10.0', true);
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          backgroundColor: const Color(0xFF16A34A),
+                                          content: Text(
+                                            isAr
+                                                ? '▶ تم استئناف حركة المصعد (Auto_DB = ON)'
+                                                : '▶ Lift resumed (Auto_DB = ON)',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  } catch (_) {}
+                                }
+                              : null,
+                          icon: const Icon(Icons.play_circle_outline_rounded, size: 19),
+                          label: Text(
+                            isAr ? 'استئناف' : 'RESUME',
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),

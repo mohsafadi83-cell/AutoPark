@@ -1106,6 +1106,33 @@ export class SiemensS7Adapter implements IndustrialController {
       throw new ControllerError('Lift is not in valid position (Lift_not_in_vaild_position = ON)', 'REJECTED');
     }
 
+    // Auto-Home Safety Guard across all 4 lanes:
+    // If ANY platform was left raised (not at Home/BTM) by a previous employee, return it to Home FIRST
+    // before dispatching the new move command to P2/P3.
+    const raisedLanes = snap.lanes.filter((l) => l.lsMapped && !l.lsBtm && (l.lsMid || l.lsTop));
+    if (!this.dryRunMode && snap.connected && raisedLanes.length > 0) {
+      this.emit({
+        type: 'LOG',
+        level: 'info',
+        message: `Auto-Home: Lane(s) ${raisedLanes.map((l) => `L${l.lane}`).join(', ')} not at Home (BTM) — returning to Home first.`,
+      });
+      await this.tryWriteLogicalTag('cancel_step_tag', false);
+      await this.tryWriteLogicalTag('auto_mode_tag', true);
+      await this.tryWriteLogicalTag('step2_start_tag', true);
+      await this.tryWriteLogicalTag('step2_ready_tag', false);
+
+      const deadline = Date.now() + 15000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 500));
+        const cur = this.getSensorsSnapshot();
+        if (cur.emergencyStop || cur.obstacleExist) {
+          throw new ControllerError('Aborted Auto-Home: Emergency Stop or Obstacle active', 'REJECTED');
+        }
+        const stillRaised = cur.lanes.some((l) => l.lsMapped && !l.lsBtm && (l.lsMid || l.lsTop));
+        if (!stillRaised) break;
+      }
+    }
+
     // Parse spot number: "L23" -> Lane 2, Level 3 (direct 1:1 match with TIA Portal PDF pp. 42-61 & 159-168!)
     const spotStr = (cmd.spaceNumber || '').toUpperCase().trim();
     const match = spotStr.match(/L?([1-4])([1-3])/);

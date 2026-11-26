@@ -508,8 +508,68 @@ export class IndustrialIntegrationService implements OnModuleInit, OnModuleDestr
       clearInterval(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this.reconnectTimer = setInterval(() => void this.tryReconnectIfOffline(), 10000);
+    this.reconnectTimer = setInterval(() => {
+      void this.tryReconnectIfOffline();
+      void this.syncSpacesFromLivePlc();
+    }, 10000);
     this.reconnectTimer.unref?.();
+    void this.syncSpacesFromLivePlc();
+  }
+
+  /**
+   * Mirrors live PLC ParkDB [DB2] bay occupancy bits (L11..L43) into PostgreSQL parking_spaces
+   * so the database and all screens always match the physical PLC state.
+   */
+  private async syncSpacesFromLivePlc() {
+    if (!(this.controller instanceof SiemensS7Adapter) || !this.controller.isConnected()) return;
+    try {
+      const plcSpaces = await this.controller.getParkingStatus();
+      if (!plcSpaces || plcSpaces.length === 0) return;
+      let changed = false;
+      for (const item of plcSpaces) {
+        const rows = (await this.cmdRepo.manager.query(
+          `SELECT id, status FROM parking_spaces WHERE space_number = $1 LIMIT 1`,
+          [item.controllerRef],
+        )) as Array<{ id: string; status: string }>;
+        const sp = rows[0];
+        if (!sp) continue;
+        if (['RESERVED', 'MOVING', 'MAINTENANCE', 'BLOCKED'].includes(sp.status)) {
+          continue;
+        }
+        if (!item.occupied && sp.status === 'OCCUPIED') {
+          await this.cmdRepo.manager.query(
+            `UPDATE parking_spaces
+             SET status = 'AVAILABLE',
+                 vehicle_id = NULL,
+                 parked_by_user_id = NULL,
+                 parked_by_username = NULL,
+                 is_other_vehicle = false,
+                 status_reason = NULL,
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [sp.id],
+          );
+          changed = true;
+        } else if (item.occupied && sp.status === 'AVAILABLE') {
+          await this.cmdRepo.manager.query(
+            `UPDATE parking_spaces
+             SET status = 'OCCUPIED',
+                 status_reason = NULL,
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [sp.id],
+          );
+          changed = true;
+        }
+      }
+      if (changed) {
+        this.cache.invalidatePrefix('parking:');
+        this.cache.invalidatePrefix('vehicles:');
+        this.realtime.emitToAll('parking.space.updated', { syncedFromPlc: true });
+      }
+    } catch {
+      // Non-fatal; retry on next poll interval
+    }
   }
 
   private async tryReconnectIfOffline() {
