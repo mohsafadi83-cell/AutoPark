@@ -132,7 +132,8 @@ class _ParkingOperationsScreenState
 
     setState(() => _submitting = true);
     try {
-      final api = ref.read(appControllerProvider.notifier).api;
+      final notifier = ref.read(appControllerProvider.notifier);
+      final api = notifier.api;
       final req = isPark
           ? await api.requestPark(
               targetSpaceNumber: space.spaceNumber,
@@ -141,8 +142,12 @@ class _ParkingOperationsScreenState
               plateNumber: space.vehiclePlate,
               targetSpaceNumber: space.spaceNumber,
             );
-      ref.read(appControllerProvider.notifier).upsertRequest(req);
-      await ref.read(appControllerProvider.notifier).refreshAllData();
+      await notifier.dispatchExeAutoHandshake(
+        spaceNumber: space.spaceNumber,
+        isPark: isPark,
+      );
+      notifier.upsertRequest(req);
+      await notifier.refreshAllData();
     } on ApiError catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -643,6 +643,66 @@ class AppController extends StateNotifier<AppState> {
   }) =>
       _api.writeLivePlcTag(address, value, pulseMs: pulseMs);
 
+  /// Mirrors the exact Desktop AutoPark.exe (Pages.cs) TIA Portal V17 Auto Handshake
+  /// so ParkIO_Data.Auto_DB (DB1,X0.3) stays latched ON and never drops out.
+  Future<void> dispatchExeAutoHandshake({
+    required String spaceNumber,
+    required bool isPark,
+  }) async {
+    final m = RegExp(r'L?([1-4])([1-3])', caseSensitive: false)
+        .firstMatch(spaceNumber.trim());
+    if (m == null) return;
+    final lane = int.parse(m.group(1)!);
+    final level = int.parse(m.group(2)!);
+
+    Future<void> safeWrite(String addr, dynamic val) async {
+      try {
+        await _api.writeLivePlcTag(addr, val, pulseMs: 0);
+      } catch (_) {
+        // Ignore if user role lacks raw PLC write permission; backend handles it.
+      }
+    }
+
+    // Match Desktop Pages.cs 400ms settle after REST request dispatch
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+
+    // Clear any leftover cancel/manual/logoff bits BEFORE latching Auto_DB (OB1 Network 9)
+    await safeWrite('M3.1', false);       // cancel_this_step = 0
+    await safeWrite('DB1,X1.1', false);   // Man_Pump = 0
+    await safeWrite('DB1,X1.2', false);   // Man_Wall = 0
+    await safeWrite('DB1,X1.3', false);   // Man_Up = 0
+    await safeWrite('DB1,X1.4', false);   // Man_Down = 0
+    await safeWrite('DB1,X1.5', false);   // Man_Cutoff = 0
+    await safeWrite('DB1,X2.6', false);   // User_Logoff = 0
+    await safeWrite('DB1,X0.5', false);   // Manual_DB = 0
+    await safeWrite('DB1,X2.7', false);   // Sim Manual = 0
+    await safeWrite('M0.3', false);       // manual_action = 0
+    await safeWrite('M0.4', false);       // Accept_action_manual = 0
+    await safeWrite('DB1,X0.3', true);    // Auto_DB = 1 (LATCHED)
+
+    // Step A: Write exact Lane_Number (DB2,B3) & Level_Number (DB2,B4) & Park_IN/OUT
+    await safeWrite('DB2,B3', lane);
+    await safeWrite('DB2,B4', level);
+    if (isPark) {
+      await safeWrite('M3.${3 + lane}', true); // Lane1..4_check_location
+      await safeWrite('DB2,X2.6', false);      // Park_OUT_START = 0
+      await safeWrite('DB2,X2.5', true);       // Park_IN_START = 1
+      await safeWrite('DB2,X6.4', false);      // Park_OUT = 0
+      await safeWrite('DB2,X6.3', true);       // Park_IN = 1
+    } else {
+      await safeWrite('DB2,X2.5', false);      // Park_IN_START = 0
+      await safeWrite('DB2,X2.6', true);       // Park_OUT_START = 1
+      await safeWrite('DB2,X6.3', false);      // Park_IN = 0
+      await safeWrite('DB2,X6.4', true);       // Park_OUT = 1
+    }
+
+    // Step B: Exact TIA Portal Page 103 (Step1_Ready=1) -> 250ms -> Page 108 (Step1_Start=1, Step1_Ready=0)
+    await safeWrite('DB2,X5.4', true);
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    await safeWrite('M10.0', true);
+    await safeWrite('DB2,X5.4', false);
+  }
+
   Future<void> logout() async {
     _realtime.disconnect();
     await _api.logout();
