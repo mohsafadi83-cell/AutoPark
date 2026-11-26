@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -26,6 +28,114 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
   SpaceStatus? _selectedStatus;
   String? _selectedSpaceNumber;
   bool _submitting = false;
+
+  // Live Lift Motion Tracker & Elapsed Counter (UI-only — never alters PLC timing/commands)
+  Timer? _motionTimer;
+  int _motionElapsedSec = 0;
+  String? _motionState; // 'UP' | 'DOWN' | 'DONE_UP' | 'DONE_DOWN'
+  String? _motionTargetBay;
+  int _motionTargetLane = 0;
+  int _motionTargetLevel = 0;
+  String? _livePlcFloorText;
+
+  @override
+  void dispose() {
+    _motionTimer?.cancel();
+    super.dispose();
+  }
+
+  String _formatElapsed(int sec) {
+    final m = (sec ~/ 60).toString().padLeft(2, '0');
+    final s = (sec % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  void _startMotionTracker({
+    required bool isDown,
+    String? targetBay,
+  }) {
+    _motionTimer?.cancel();
+    int lane = 0;
+    int level = 0;
+    if (targetBay != null) {
+      final m = RegExp(r'L?([1-4])([1-3])', caseSensitive: false).firstMatch(targetBay);
+      if (m != null) {
+        lane = int.parse(m.group(1)!);
+        level = int.parse(m.group(2)!);
+      }
+    }
+    setState(() {
+      _motionElapsedSec = 0;
+      _motionState = isDown ? 'DOWN' : 'UP';
+      _motionTargetBay = targetBay;
+      _motionTargetLane = lane;
+      _motionTargetLevel = level;
+      _livePlcFloorText = null;
+    });
+
+    _motionTimer = Timer.periodic(const Duration(seconds: 1), (t) async {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() => _motionElapsedSec++);
+
+      // Poll live PLC limit switches every 2s to show real-time floor & detect arrival
+      if (_motionElapsedSec >= 2 && _motionElapsedSec % 2 == 0) {
+        try {
+          final snap = await ref.read(appControllerProvider.notifier).fetchLiveSensors();
+          if (!mounted) return;
+          final lanes = snap['lanes'];
+          if (lanes is List && lanes.isNotEmpty) {
+            bool arrived = false;
+            String? floorTxt;
+            if (isDown) {
+              final allBtm = lanes.every((l) => l is Map && l['lsBtm'] == true);
+              arrived = allBtm;
+              floorTxt = allBtm ? 'Home (LS_BTM)' : 'Moving ↓ Home';
+            } else if (_motionTargetLane >= 1 && _motionTargetLane <= 4) {
+              final laneMap = lanes.firstWhere(
+                (l) => l is Map && l['lane'] == _motionTargetLane,
+                orElse: () => null,
+              );
+              if (laneMap is Map) {
+                final lsTop = laneMap['lsTop'] == true;
+                final lsMid = laneMap['lsMid'] == true;
+                final lsBtm = laneMap['lsBtm'] == true;
+                floorTxt = lsTop
+                    ? 'P3 (LS_TOP)'
+                    : lsMid
+                        ? 'P2 (LS_MID)'
+                        : lsBtm
+                            ? 'P1 / Home (LS_BTM)'
+                            : 'Moving ↑';
+                if (_motionTargetLevel == 3 && lsTop) arrived = true;
+                if (_motionTargetLevel == 2 && lsMid) arrived = true;
+                if (_motionTargetLevel == 1 && lsBtm && _motionElapsedSec >= 4) arrived = true;
+              }
+            }
+            setState(() {
+              _livePlcFloorText = floorTxt;
+              if (arrived) {
+                _motionState = isDown ? 'DONE_DOWN' : 'DONE_UP';
+                t.cancel();
+              }
+            });
+          }
+        } catch (_) {
+          // Keep counter running cleanly during transient network blips
+        }
+      }
+
+      // Safety UI cap at 45s so indicator never spins forever
+      if (_motionElapsedSec >= 45 && (_motionState == 'UP' || _motionState == 'DOWN')) {
+        t.cancel();
+        if (mounted) {
+          setState(() => _motionState = isDown ? 'DONE_DOWN' : 'DONE_UP');
+        }
+      }
+    });
+  }
 
   String _floorDescription(int level, bool isAr) {
     switch (level) {
@@ -111,6 +221,7 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
     if (confirmed != true || !mounted) return;
 
     setState(() => _submitting = true);
+    _startMotionTracker(isDown: false, targetBay: space.spaceNumber);
     try {
       final notifier = ref.read(appControllerProvider.notifier);
       final api = notifier.api;
@@ -127,7 +238,7 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
         isPark: isPark,
       );
       notifier.upsertRequest(req);
-      await notifier.refreshAllData();
+      unawaited(notifier.refreshAllData());
       if (mounted) {
         messenger.showSnackBar(
           SnackBar(
@@ -215,9 +326,10 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
     if (confirmed != true || !mounted) return;
 
     setState(() => _submitting = true);
+    _startMotionTracker(isDown: true, targetBay: _selectedSpaceNumber);
     try {
       await ref.read(appControllerProvider.notifier).api.returnLiftToHome();
-      await ref.read(appControllerProvider.notifier).refreshAllData();
+      unawaited(ref.read(appControllerProvider.notifier).refreshAllData());
       if (mounted) {
         messenger.showSnackBar(
           SnackBar(
@@ -318,6 +430,37 @@ class _ParkingMapScreenState extends ConsumerState<ParkingMapScreen> {
       liftSubtitle = isAr
           ? 'الحركة متوقفة لحين زوال حالة الأمان أو الطوارئ'
           : 'Motion blocked until Emergency Stop / Alarm is cleared';
+    } else if (_motionState == 'UP' || _motionState == 'DOWN') {
+      final isDown = _motionState == 'DOWN';
+      final bayTxt = _motionTargetBay != null ? ' (${_motionTargetBay!})' : '';
+      final floorPart = _livePlcFloorText != null ? ' • $_livePlcFloorText' : '';
+      liftColor = const Color(0xFFD97706);
+      liftIcon = isDown ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded;
+      liftTitle = isAr
+          ? (isDown
+              ? 'جاري إنزال المصعد إلى Home...  ⏱ ${_formatElapsed(_motionElapsedSec)}'
+              : 'جاري تحريك المصعد للأعلى$bayTxt...  ⏱ ${_formatElapsed(_motionElapsedSec)}')
+          : (isDown
+              ? 'Returning Lift to Home...  ⏱ ${_formatElapsed(_motionElapsedSec)}'
+              : 'Moving Lift Up$bayTxt...  ⏱ ${_formatElapsed(_motionElapsedSec)}');
+      liftSubtitle = isAr
+          ? 'النظام يعمل والـ PLC ينفذ الحركة الآن$floorPart'
+          : 'System active — PLC executing lift motion$floorPart';
+    } else if (_motionState == 'DONE_UP' || _motionState == 'DONE_DOWN') {
+      final isDown = _motionState == 'DONE_DOWN';
+      final bayTxt = _motionTargetBay != null ? ' (${_motionTargetBay!})' : '';
+      liftColor = const Color(0xFF16A34A);
+      liftIcon = Icons.task_alt_rounded;
+      liftTitle = isAr
+          ? (isDown
+              ? '✅ عاد المصعد إلى وضع Home بنجاح  (${_formatElapsed(_motionElapsedSec)})'
+              : '✅ وصل المصعد إلى المصف$bayTxt بنجاح  (${_formatElapsed(_motionElapsedSec)})')
+          : (isDown
+              ? '✅ Lift Returned to Home  (${_formatElapsed(_motionElapsedSec)})'
+              : '✅ Lift Arrived at Bay$bayTxt  (${_formatElapsed(_motionElapsedSec)})');
+      liftSubtitle = isAr
+          ? 'الموقع الحالي: ${_livePlcFloorText ?? 'جاهز'}'
+          : 'Current Position: ${_livePlcFloorText ?? 'Ready'}';
     } else if (hasActiveMove) {
       final activeReq = appState.activeRequests.first;
       liftColor = const Color(0xFFD97706);
