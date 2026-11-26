@@ -149,6 +149,34 @@ export class IndustrialIntegrationService implements OnModuleInit, OnModuleDestr
       result = { ok: true, controlKey, active, message: `Simulated manual control: ${controlKey}=${active}` };
     }
 
+    // When performing a Manual Slot Reset (spot_L11_tag .. spot_L43_tag -> false),
+    // also clear occupancy in PostgreSQL parking_spaces & invalidate cache so PLC [DB2] and DB stay 100% in sync!
+    const spotMatch = /^spot_(L[1-4][1-3])_tag$/i.exec(controlKey);
+    if (spotMatch && !active) {
+      const spaceNumber = spotMatch[1].toUpperCase();
+      try {
+        await this.cmdRepo.manager.query(
+          `UPDATE parking_spaces
+              SET status = 'AVAILABLE',
+                  "vehicleId" = NULL,
+                  "parkedByUserId" = NULL,
+                  "parkedByUsername" = NULL,
+                  "isOtherVehicle" = false,
+                  "updatedAt" = NOW()
+            WHERE UPPER("spaceNumber") = $1`,
+          [spaceNumber],
+        );
+        this.cache.invalidatePrefix('parking:');
+        this.cache.invalidatePrefix('vehicles:');
+        result = {
+          ...result,
+          message: `تم تصفير المصف ${spaceNumber} من الـ PLC (ParkDB [DB2]) ومن قاعدة البيانات بنجاح.`,
+        };
+      } catch (err) {
+        this.logger.warn(`Failed to sync manual slot reset for ${spaceNumber} to DB: ${(err as Error).message}`);
+      }
+    }
+
     await this.audit.log({
       userId: user.id,
       username: user.username,
