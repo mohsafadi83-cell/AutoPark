@@ -1704,6 +1704,26 @@ namespace AutoPark
             });
         }
 
+        static string SpotCodeToDb2Addr(string code)
+        {
+            switch ((code ?? "").Trim().ToUpperInvariant())
+            {
+                case "L11": return "DB2,X0.0";
+                case "L12": return "DB2,X0.1";
+                case "L13": return "DB2,X0.2";
+                case "L21": return "DB2,X0.3";
+                case "L22": return "DB2,X0.4";
+                case "L23": return "DB2,X0.5";
+                case "L31": return "DB2,X0.6";
+                case "L32": return "DB2,X0.7";
+                case "L33": return "DB2,X1.0";
+                case "L41": return "DB2,X1.1";
+                case "L42": return "DB2,X1.2";
+                case "L43": return "DB2,X1.3";
+                default: return "";
+            }
+        }
+
         void ConfirmResetSlot(string spotCode)
         {
             var res = Loc.ShowMsg(
@@ -1728,8 +1748,13 @@ namespace AutoPark
             st.NotifyChanged();
 
             string key = "spot_" + spotCode + "_tag";
+            string db2Addr = SpotCodeToDb2Addr(spotCode);
             ThreadPool.QueueUserWorkItem(delegate
             {
+                if (!string.IsNullOrEmpty(db2Addr))
+                {
+                    st.SendPlcWriteBool(db2Addr, false, 0);
+                }
                 st.SendManualControl(key, false);
                 System.Threading.Thread.Sleep(350);
                 st.PullSpacesFromDatabase();

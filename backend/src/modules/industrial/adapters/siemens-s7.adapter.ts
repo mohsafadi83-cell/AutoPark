@@ -227,10 +227,18 @@ export class SiemensS7Adapter implements IndustrialController {
     return this.settings.slot ?? 1;
   }
 
+  private static readonly SPOT_DB2_FALLBACK: Record<string, string> = {
+    spot_L11_tag: 'DB2,X0.0', spot_L12_tag: 'DB2,X0.1', spot_L13_tag: 'DB2,X0.2',
+    spot_L21_tag: 'DB2,X0.3', spot_L22_tag: 'DB2,X0.4', spot_L23_tag: 'DB2,X0.5',
+    spot_L31_tag: 'DB2,X0.6', spot_L32_tag: 'DB2,X0.7', spot_L33_tag: 'DB2,X1.0',
+    spot_L41_tag: 'DB2,X1.1', spot_L42_tag: 'DB2,X1.2', spot_L43_tag: 'DB2,X1.3',
+  };
+
   private getTagAddress(key: string): string | null {
     const def = (this.settings.tagMap as Record<string, TagDefinition | undefined>)[key];
     const addr = def?.address?.trim();
-    return addr || null;
+    if (addr) return addr;
+    return SiemensS7Adapter.SPOT_DB2_FALLBACK[key] ?? null;
   }
 
   private buildTranslationMap(): Record<string, string> {
