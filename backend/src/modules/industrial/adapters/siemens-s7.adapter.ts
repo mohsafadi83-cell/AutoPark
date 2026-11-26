@@ -1114,29 +1114,30 @@ export class SiemensS7Adapter implements IndustrialController {
     const plcLevel = mapUiFloorToPlcLevel(uiFloor);
 
     // -------------------------------------------------------------------------
-    // Official TIA Portal V17 2-Step Auto Handshake (Verified from HMI_RT_2 PDF):
-    // 1) Screen Load Reset (pp. 102-103): clear User_Logoff, Manual_DB, Sim Manual, manual_action
-    // 2) Bay Select (pp. 42-61, 159-168):
-    //    - Park IN: SetBit(Lane{n}_check_location %M3.4..3.7), SetTag(Lane_Number, Level_Number), SetBit(Park_IN DB2,X6.3)
-    //    - Park OUT: SetTag(Lane_Number, Level_Number), SetBit(Park_OUT DB2,X6.4)
-    //    Note: Park_IN / Park_OUT are LATCHED (SetBit), NOT pulsed for 350ms!
-    // 3) Auto Screen Arm (p. 103): SetBit(Auto_DB DB1,X0.3), SetBit(Park_Step1_Ready DB2,X5.4)
-    // 4) Step 1 Start (p. 108): SetBit(Park_IN_Step1_Start %M10.0) [LATCHED], ResetBit(Park_Step1_Ready DB2,X5.4)
-    // 5) Step 2 Start (p. 104): SetBit(Park_IN_Step2_Start %M10.1) [LATCHED], ResetBit(Park_Step2_Ready DB2,X5.6)
+    // Exact 1:1 Desktop EXE (Pages.cs) & TIA Portal V17 Auto Handshake:
+    // 1) Clear cancel_this_step (M3.1) + all manual/logoff bits BEFORE latching Auto_DB (DB1,X0.3)
+    // 2) Latch Auto_DB (DB1,X0.3) = 1
+    // 3) Write Lane_Number (DB2,B3), Level_Number (DB2,B4), Park_IN / Park_OUT
+    // 4) SetBit(Park_Step1_Ready DB2,X5.4) -> wait 250ms -> SetBit(Park_IN_Step1_Start %M10.0) -> ResetBit(DB2,X5.4)
     // -------------------------------------------------------------------------
+    await this.tryWriteLogicalTag('cancel_step_tag', false);
+    await this.tryWriteLogicalTag('man_pump_tag', false);
+    await this.tryWriteLogicalTag('man_wall_tag', false);
+    await this.tryWriteLogicalTag('man_up_tag', false);
+    await this.tryWriteLogicalTag('man_down_tag', false);
+    await this.tryWriteLogicalTag('man_cutoff_tag', false);
     await this.tryWriteLogicalTag('user_logoff_tag', false);
     await this.tryWriteLogicalTag('manual_mode_tag', false);
     await this.tryWriteLogicalTag('sim_manual_tag', false);
     await this.tryWriteLogicalTag('manual_action_tag', false);
-
-    if (cmd.type === 'PARK') {
-      await this.tryWriteLogicalTag(`check_loc_L${lane}`, true);
-    }
+    await this.tryWriteLogicalTag('accept_manual_tag', false);
+    await this.tryWriteLogicalTag('auto_mode_tag', true);
 
     await this.tryWriteLogicalTag('lane_number_tag', lane);
     await this.tryWriteLogicalTag('level_number_tag', plcLevel);
 
     if (cmd.type === 'PARK') {
+      await this.tryWriteLogicalTag(`check_loc_L${lane}`, true);
       await this.tryWriteLogicalTag('park_out_start_db_tag', false);
       await this.tryWriteLogicalTag('park_in_start_db_tag', true);
       await this.tryWriteLogicalTag('retrieve_command_tag', false);
@@ -1148,15 +1149,11 @@ export class SiemensS7Adapter implements IndustrialController {
       await this.tryWriteLogicalTag('retrieve_command_tag', true);
     }
 
-    // Ensure clean Auto Mode prerequisites per TIA Portal OB1 Network 9:
-    // Clear cancel_this_step (%M3.1), Manual_DB (DB1,X0.5), User_Logoff (DB1,X2.6) BEFORE latching Auto_DB (DB1,X0.3) = 1
-    await this.tryWriteLogicalTag('cancel_step_tag', false);
-    await this.tryWriteLogicalTag('manual_mode_tag', false);
-    await this.tryWriteLogicalTag('user_logoff_tag', false);
-    await this.tryWriteLogicalTag('auto_mode_tag', true);
+    // Exact TIA Portal Page 103 (Step1_Ready=1) -> 250ms scan settle -> Page 108 (Step1_Start=1, Step1_Ready=0)
     await this.tryWriteLogicalTag('step1_ready_tag', true);
-
-    // Trigger Step 1 Start (latched ON — PLC resets %M10.0 upon completion; ResetBit Step1_Ready per PDF p. 108)
+    if (!this.dryRunMode) {
+      await new Promise((r) => setTimeout(r, 250));
+    }
     await this.tryWriteLogicalTag('step1_start_tag', true);
     await this.tryWriteLogicalTag('step1_ready_tag', false);
 
