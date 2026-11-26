@@ -43,6 +43,8 @@ function buildFullVerifiedSettings(): IntegrationSettings {
       man_l2_tag: { address: 'DB1,X1.7', dataType: 'BOOL', access: 'RW', description: 'Man_L2_DB' },
       man_l3_tag: { address: 'DB1,X2.0', dataType: 'BOOL', access: 'RW', description: 'Man_L3_DB' },
       man_l4_tag: { address: 'DB1,X2.1', dataType: 'BOOL', access: 'RW', description: 'Man_L4_DB' },
+      spot_L32_tag: { address: 'DB2,X0.7', dataType: 'BOOL', access: 'RW', description: 'ParkDB.L32' },
+      spot_L41_tag: { address: 'DB2,X1.1', dataType: 'BOOL', access: 'RW', description: 'ParkDB.L41' },
       man_s1_tag: { address: 'DB1,X2.2', dataType: 'BOOL', access: 'RW', description: 'Man_LQ1_DB' },
       man_s2_tag: { address: 'DB1,X2.3', dataType: 'BOOL', access: 'RW', description: 'Man_LQ2_DB' },
       man_s3_tag: { address: 'DB1,X2.4', dataType: 'BOOL', access: 'RW', description: 'Man_LQ3_DB' },
@@ -166,6 +168,8 @@ describe('SiemensS7Adapter — Safe Dry-Run Simulation (ZERO Physical Movement)'
     expect(seq).toContain('cancel_step_tag:M3.1=false');
     expect(seq).toContain('auto_mode_tag:DB1,X0.3=true');
     expect(seq).not.toContain('step2_start_tag:M10.1=true');
+    // ParkDB [DB2] spot occupancy bit mirrored to PLC on car entry
+    expect(writes.some((w) => w.tagKey === 'spot_L32_tag' && w.value === true)).toBe(true);
 
     const fb = await adapter.getCommandStatus('CMD-DRY-PARK-L32');
     expect(fb.status).toBe('COMPLETED');
@@ -186,6 +190,8 @@ describe('SiemensS7Adapter — Safe Dry-Run Simulation (ZERO Physical Movement)'
     expect(seq).toContain('step1_start_tag:M10.0=true');
     expect(seq).toContain('auto_mode_tag:DB1,X0.3=true');
     expect(seq).not.toContain('step2_start_tag:M10.1=true');
+    // ParkDB [DB2] spot occupancy bit cleared in PLC on car exit
+    expect(writes.some((w) => w.tagKey === 'spot_L41_tag' && w.value === false)).toBe(true);
   });
 
   test('Manual UP / DOWN enforce strict hydraulic interlock (UP clears DOWN+Cutoff; DOWN clears UP+Pump+Cutoff)', async () => {

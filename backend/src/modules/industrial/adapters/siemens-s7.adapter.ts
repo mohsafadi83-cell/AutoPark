@@ -1212,8 +1212,12 @@ export class SiemensS7Adapter implements IndustrialController {
     // Step 2 (Return Park) MUST NEVER be auto-triggered by a timer!
     // Auto_DB (DB1,X0.3) stays latched ON until operator explicitly triggers RETURN_PARK (M10.1=1) and platform returns Home.
     const step2Time = ackDelay + (pathFloors.length + 1) * stepDelay;
+    const spotTagKey = `spot_L${lane}${uiFloor}_tag`;
     rc.timers.push(
       setTimeout(() => {
+        // Sync car entry/exit occupancy directly to PLC ParkDB [DB2] (spot_L11_tag..spot_L43_tag)
+        // just as PostgreSQL parking_spaces is updated on COMPLETED.
+        void this.tryWriteLogicalTag(spotTagKey, cmd.type === 'PARK').catch(() => undefined);
         this.updateCmd(rc, {
           status: 'COMPLETED',
           progress: 100,
