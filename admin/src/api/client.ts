@@ -38,7 +38,7 @@ let refreshPromise: Promise<string> | null = null;
  * Single-flight refresh: concurrent callers share one in-flight request.
  * Refresh tokens rotate, so issuing two refreshes in parallel would revoke the token family.
  */
-export function refreshAccessToken(): Promise<string> {
+export function refreshAccessToken(opts?: { silent?: boolean }): Promise<string> {
   if (refreshPromise) return refreshPromise;
   const refreshToken = tokenStore.getRefreshToken();
   if (!refreshToken) {
@@ -53,7 +53,9 @@ export function refreshAccessToken(): Promise<string> {
     })
     .catch((err: unknown) => {
       tokenStore.clear();
-      handlers.onSessionExpired?.();
+      if (!opts?.silent) {
+        handlers.onSessionExpired?.();
+      }
       throw err;
     })
     .finally(() => {

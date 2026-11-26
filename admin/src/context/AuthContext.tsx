@@ -91,7 +91,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
       try {
-        await refreshAccessToken();
+        await refreshAccessToken({ silent: true });
         if (active) {
           const me = await authApi.me();
           if (active) setUser(me);
