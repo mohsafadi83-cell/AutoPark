@@ -5,12 +5,12 @@ import { APP_CONFIG, AppConfig } from '../../config/app.config';
 import { AppCacheService } from '../../common/cache.module';
 import { AuthUser, RequestMeta } from '../../common/decorators';
 import {
-  AlarmSeverity, CommandStatus, EventCategory, IN_FLIGHT_COMMAND_STATUSES, Protocol, RequestType,
+  AlarmSeverity, CommandStatus, EventCategory, IN_FLIGHT_COMMAND_STATUSES, Protocol, RequestType, SpaceStatus,
 } from '../../common/enums';
 import { AppError } from '../../common/errors';
 import { pageParams, paginated, PaginationQuery } from '../../common/pagination';
 import { decryptSecret, encryptSecret, iso, MASK } from '../../common/utils';
-import { IndustrialCommandEntity, IntegrationConfigEntity } from '../../database/entities';
+import { IndustrialCommandEntity, IntegrationConfigEntity, ParkingSpaceEntity } from '../../database/entities';
 import { AlarmsService } from '../alarms/alarms.module';
 import { AuditService } from '../audit/audit.module';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -155,16 +155,18 @@ export class IndustrialIntegrationService implements OnModuleInit, OnModuleDestr
     if (spotMatch && !active) {
       const spaceNumber = spotMatch[1].toUpperCase();
       try {
-        await this.cmdRepo.manager.query(
-          `UPDATE parking_spaces
-              SET status = 'AVAILABLE',
-                  "vehicleId" = NULL,
-                  "parkedByUserId" = NULL,
-                  "parkedByUsername" = NULL,
-                  "isOtherVehicle" = false,
-                  "updatedAt" = NOW()
-            WHERE UPPER("spaceNumber") = $1`,
-          [spaceNumber],
+        // Use entity property names (DB uses snake_case columns via SnakeNamingStrategy)
+        await this.cmdRepo.manager.update(
+          ParkingSpaceEntity,
+          { spaceNumber },
+          {
+            status: SpaceStatus.AVAILABLE,
+            vehicleId: null,
+            parkedByUserId: null,
+            parkedByUsername: null,
+            isOtherVehicle: false,
+            statusReason: null,
+          },
         );
         this.cache.invalidatePrefix('parking:');
         this.cache.invalidatePrefix('vehicles:');
@@ -526,39 +528,30 @@ export class IndustrialIntegrationService implements OnModuleInit, OnModuleDestr
       const plcSpaces = await this.controller.getParkingStatus();
       if (!plcSpaces || plcSpaces.length === 0) return;
       let changed = false;
+      const spaceRepo = this.cmdRepo.manager.getRepository(ParkingSpaceEntity);
       for (const item of plcSpaces) {
-        const rows = (await this.cmdRepo.manager.query(
-          `SELECT id, status FROM parking_spaces WHERE space_number = $1 LIMIT 1`,
-          [item.controllerRef],
-        )) as Array<{ id: string; status: string }>;
-        const sp = rows[0];
+        const sp = await spaceRepo.findOne({ where: { spaceNumber: item.controllerRef.toUpperCase() } });
         if (!sp) continue;
-        if (['RESERVED', 'MOVING', 'MAINTENANCE', 'BLOCKED'].includes(sp.status)) {
+        if (
+          sp.status === SpaceStatus.RESERVED ||
+          sp.status === SpaceStatus.MOVING ||
+          sp.status === SpaceStatus.MAINTENANCE ||
+          sp.status === SpaceStatus.BLOCKED
+        ) {
           continue;
         }
-        if (!item.occupied && sp.status === 'OCCUPIED') {
-          await this.cmdRepo.manager.query(
-            `UPDATE parking_spaces
-             SET status = 'AVAILABLE',
-                 vehicle_id = NULL,
-                 parked_by_user_id = NULL,
-                 parked_by_username = NULL,
-                 is_other_vehicle = false,
-                 status_reason = NULL,
-                 updated_at = NOW()
-             WHERE id = $1`,
-            [sp.id],
-          );
+        if (!item.occupied && sp.status === SpaceStatus.OCCUPIED) {
+          await spaceRepo.update(sp.id, {
+            status: SpaceStatus.AVAILABLE,
+            vehicleId: null,
+            parkedByUserId: null,
+            parkedByUsername: null,
+            isOtherVehicle: false,
+            statusReason: null,
+          });
           changed = true;
-        } else if (item.occupied && sp.status === 'AVAILABLE') {
-          await this.cmdRepo.manager.query(
-            `UPDATE parking_spaces
-             SET status = 'OCCUPIED',
-                 status_reason = NULL,
-                 updated_at = NOW()
-             WHERE id = $1`,
-            [sp.id],
-          );
+        } else if (item.occupied && sp.status === SpaceStatus.AVAILABLE) {
+          await spaceRepo.update(sp.id, { status: SpaceStatus.OCCUPIED, statusReason: null });
           changed = true;
         }
       }
