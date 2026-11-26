@@ -81,7 +81,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setConnecting(true);
     const socket: Socket = io(`${getSocketOrigin()}/realtime`, {
       auth: { token },
-      transports: ['websocket'],
+      transports: ['polling', 'websocket'],
+      upgrade: true,
       reconnection: true,
       reconnectionDelay: 1500,
       reconnectionDelayMax: 8000,
@@ -115,7 +116,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     socket.on('auth.error', async () => {
       setConnected(false);
       try {
-        const fresh = await refreshAccessToken();
+        const fresh = await refreshAccessToken({ silent: true });
         socket.auth = { token: fresh };
         socket.connect();
       } catch {
