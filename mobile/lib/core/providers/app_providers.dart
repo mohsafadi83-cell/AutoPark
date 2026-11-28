@@ -205,6 +205,10 @@ class AppController extends StateNotifier<AppState> {
       _listenConnectivity();
       _startAutoRefreshTimer();
 
+      // Auto-select working IP on startup: try Public IP (46.185.128.165:3000) first,
+      // then Local IP (192.168.0.30:3000), and lock the working IP into the app URL!
+      await _autoSelectBestHost();
+
       // If biometric unlock is not required immediately and a valid token exists,
       // restore the session automatically.
       final stored = await _tokenStorage.read();
@@ -236,8 +240,12 @@ class AppController extends StateNotifier<AppState> {
         final online = results.any((r) => r != ConnectivityResult.none);
         if (mounted) {
           state = state.copyWith(networkOnline: online);
-          if (online && state.isAuthenticated) {
-            refreshAllData();
+          if (online) {
+            unawaited(_autoSelectBestHost().then((_) {
+              if (mounted && state.isAuthenticated) {
+                refreshAllData();
+              }
+            }));
           }
         }
       });
@@ -389,6 +397,27 @@ class AppController extends StateNotifier<AppState> {
     state = state.copyWith(biometricEnabled: enabled);
   }
 
+  /// Automatically probes Public IP (46.185.128.165:3000) first, then Local IP (192.168.0.30:3000),
+  /// and locks the first reachable IP as the active & saved Backend Server URL.
+  Future<void> _autoSelectBestHost() async {
+    // On Web (Safari/Chrome), keep the browser origin URL.
+    if (identical(0, 0.0)) return;
+    final candidates = AppConfig.fallbackHosts.map(AppConfig.normalizeHost).toList();
+    for (final host in candidates) {
+      try {
+        await _api.checkHealth(host).timeout(const Duration(milliseconds: 2500));
+        _api.updateHost(host);
+        await _prefs.setServerHost(host);
+        if (mounted && state.serverHost != host) {
+          state = state.copyWith(serverHost: host, backendReachable: true);
+        }
+        return;
+      } catch (_) {
+        // Try next IP in priority order
+      }
+    }
+  }
+
   Future<String?> _discoverReachableHost() async {
     final current = AppConfig.normalizeHost(state.serverHost);
     final candidates = AppConfig.fallbackHosts
@@ -397,24 +426,15 @@ class AppController extends StateNotifier<AppState> {
         .toList();
     if (candidates.isEmpty) return null;
 
-    final completer = Completer<String?>();
-    var remaining = candidates.length;
     for (final host in candidates) {
-      _api.checkHealth(host).then((_) {
-        if (!completer.isCompleted) {
-          completer.complete(host);
-        }
-      }).catchError((_) {
-        remaining--;
-        if (remaining <= 0 && !completer.isCompleted) {
-          completer.complete(null);
-        }
-      });
+      try {
+        await _api.checkHealth(host).timeout(const Duration(milliseconds: 2500));
+        return host;
+      } catch (_) {
+        // Try next IP in priority order
+      }
     }
-    return completer.future.timeout(
-      const Duration(seconds: 6),
-      onTimeout: () => null,
-    );
+    return null;
   }
 
   Future<void> login({
