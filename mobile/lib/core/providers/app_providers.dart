@@ -397,15 +397,30 @@ class AppController extends StateNotifier<AppState> {
     state = state.copyWith(biometricEnabled: enabled);
   }
 
-  /// Automatically probes Public IP (46.185.128.165:3000) first, then Local IP (192.168.0.30:3000),
-  /// and locks the first reachable IP as the active & saved Backend Server URL.
+  /// Smart Wi-Fi vs 4G/5G Auto-Connection:
+  /// - On Wi-Fi: checks Local Company IP (192.168.0.30:3000) first, then Public IP (46.185.128.165:3000).
+  /// - On 4G/5G: checks Public IP (46.185.128.165:3000) first, then Local IP (192.168.0.30:3000).
+  /// Locks the first reachable IP as the active & saved Backend Server URL.
   Future<void> _autoSelectBestHost() async {
     // On Web (Safari/Chrome), keep the browser origin URL.
     if (identical(0, 0.0)) return;
-    final candidates = AppConfig.fallbackHosts.map(AppConfig.normalizeHost).toList();
+    bool isWifi = false;
+    try {
+      final results = await Connectivity().checkConnectivity();
+      isWifi = results.contains(ConnectivityResult.wifi) ||
+          results.contains(ConnectivityResult.ethernet);
+    } catch (_) {}
+
+    const publicIp = 'http://46.185.128.165:3000';
+    const localIp = 'http://192.168.0.30:3000';
+    final candidates = isWifi
+        ? <String>[localIp, publicIp]
+        : <String>[publicIp, localIp];
+
     for (final host in candidates) {
       try {
-        await _api.checkHealth(host).timeout(const Duration(milliseconds: 2500));
+        final timeoutMs = (isWifi && host == localIp) ? 1500 : 2500;
+        await _api.checkHealth(host).timeout(Duration(milliseconds: timeoutMs));
         _api.updateHost(host);
         await _prefs.setServerHost(host);
         if (mounted && state.serverHost != host) {
