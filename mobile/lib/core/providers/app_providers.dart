@@ -501,9 +501,15 @@ class AppController extends StateNotifier<AppState> {
     if (!canCheck) return false;
     final didAuth = await auth.authenticate(
       localizedReason: localizedReason,
-      options: const AuthenticationOptions(biometricOnly: false),
+      options: const AuthenticationOptions(
+        biometricOnly: false,
+        stickyAuth: true,
+      ),
     );
     if (!didAuth) return false;
+    // Allow iOS Face ID / Android biometric sheet to dismiss before network calls
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    await _autoSelectBestHost();
     return restoreSession();
   }
 
@@ -511,7 +517,15 @@ class AppController extends StateNotifier<AppState> {
     try {
       final tokens = await _tokenStorage.read();
       if (tokens == null) return false;
-      final user = await _api.getMe();
+      User user;
+      try {
+        user = await _api.getMe();
+      } catch (_) {
+        // Access token may have expired while app was closed — refresh token first!
+        final refreshed = await _api.refreshTokensSingleFlight();
+        if (refreshed == null) rethrow;
+        user = await _api.getMe();
+      }
       await _prefs.cacheUser(user);
       state = state.copyWith(
         user: user,
@@ -535,6 +549,9 @@ class AppController extends StateNotifier<AppState> {
           spaces: cachedSpaces,
           vehicles: cachedVehicles,
         );
+        // Immediately reconnect & sync in background so buttons never stay stuck disabled
+        unawaited(_connectRealtime());
+        unawaited(refreshAllData());
         return true;
       }
       return false;
