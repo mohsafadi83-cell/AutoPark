@@ -176,7 +176,12 @@ class AppController extends StateNotifier<AppState> {
       await LocalNotificationService.instance.init();
       final locale = await _prefs.getLocale();
       final themeMode = await _prefs.getThemeMode();
-      final host = await _prefs.getServerHost();
+      var host = await _prefs.getServerHost();
+      // Auto-migrate any expired temporary trycloudflare.com URL to Public IP (46.185.128.165:3000)
+      if (!identical(0, 0.0) && host.contains('trycloudflare.com')) {
+        host = AppConfig.defaultHost;
+        await _prefs.setServerHost(host);
+      }
       final bio = await _prefs.getBiometricEnabled();
       final remember = await _prefs.getRememberMe();
       final hasPersisted = await _tokenStorage.hasPersistedSession();

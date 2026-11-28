@@ -26,6 +26,13 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Auto Park uses Face ID to securely unlock your operator or customer session.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Auto Park connects to your company parking server on the local network (192.168.0.30).</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
